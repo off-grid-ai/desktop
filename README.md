@@ -15,6 +15,22 @@
 
 ---
 
+> **Status: work in progress.** This repo is My Memories, the app that's becoming **Off Grid Desktop**, part of the [Off Grid](https://github.com/off-grid-ai) ecosystem. What's documented below is what works today. Expect rough edges while the rebrand and integration land.
+
+## Where Off Grid Desktop is headed
+
+My Memories came first, before Off Grid. It started as a way to keep my own thinking from getting trapped inside whatever AI tool I happened to be using that month. It watches the LLM apps and browser windows you already use, understands each conversation, and stores it as memory on your machine. It downloads a model locally and does everything on device. No vendor lock-in, no data collected.
+
+It's becoming Off Grid Desktop: the intelligence layer for your laptop. The goal is to capture your whole day where you work, not just chat history but meetings, email, and the work context that makes everything else useful, and to do all of it on device. Off Grid Desktop pairs with Off Grid Mobile in your pocket and Off Grid Sync, the private backbone that moves context between your devices.
+
+Today it does the AI-conversation capture documented below. The rest is being built in the open. Parts will change, and some will break before they settle.
+
+- Off Grid Mobile, on-device intelligence in your pocket: https://github.com/off-grid-ai/mobile
+- Off Grid Sync, private device-to-device sync: https://github.com/off-grid-ai/sync
+- The full thesis: https://github.com/off-grid-ai
+
+---
+
 ## The Problem
 
 You've had hundreds of conversations with AI assistants. Important insights are scattered across ChatGPT, Claude, Gemini, and more. Finding "that one conversation" where you solved a problem takes forever. And syncing to the cloud means giving up control of your data.
@@ -67,8 +83,8 @@ Find conversations by meaning, not just keywords. Search your entire knowledge b
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/your-memories.git
-cd your-memories
+git clone https://github.com/off-grid-ai/desktop.git
+cd desktop
 
 # Install dependencies
 npm install
