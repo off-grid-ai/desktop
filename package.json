@@ -2,6 +2,7 @@
   "name": "my-memories",
   "version": "0.0.5",
   "description": "An Electron application with React and TypeScript",
+  "license": "AGPL-3.0-only",
   "main": "./out/main/index.js",
   "author": "example.com",
   "homepage": "https://electron-vite.org",

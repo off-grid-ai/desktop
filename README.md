@@ -171,7 +171,9 @@ Contributions welcome! Please read our contribution guidelines before submitting
 
 ## License
 
-Contact maintainers for licensing inquiries.
+Licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. See [LICENSE](LICENSE).
+
+In short: you're free to use, study, modify, and share this code, but any version you distribute or run as a network service must also be released as open source under the same license. Copyright (C) 2026 Mohammed Ali Chherawalla.
 
 ---
 
