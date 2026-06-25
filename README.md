@@ -9,8 +9,9 @@
 </p>
 
 <p align="center">
-  Run open models — <em>text, vision, image, voice, and speech</em> — entirely on your machine,
-  through one local OpenAI-compatible gateway.
+  A local-first AI runtime + studio — run open models (<em>text, vision, image, voice, speech</em>)
+  entirely on your machine, behind one OpenAI-compatible gateway. Plus an always-on layer that
+  <em>sees, remembers, reflects, and acts</em> — all on-device.
 </p>
 
 <p align="center">
@@ -36,29 +37,51 @@ inference runs on your hardware via bundled `llama.cpp`, `stable-diffusion.cpp`,
 `whisper.cpp`, and Kokoro. Nothing routes through a server we own; your conversations,
 files, and models never leave your device.
 
-It's also an **OpenAI-compatible gateway**: point any OpenAI client at
-`http://127.0.0.1:7878/v1` (no key) and call chat, vision, image, audio, and embeddings
-locally — or run it headless as just the gateway.
+Three things in one app:
+
+1. **A studio** — chat (text + vision + reasoning), on-device image generation, voice
+   in/out, live artifacts/canvas, projects with RAG, and in-chat tools — a local
+   Claude/LM-Studio/Ollama with everything on-device.
+2. **A gateway** — one local OpenAI-compatible API (`http://127.0.0.1:7878/v1`, no key)
+   for chat, vision, image, audio, and embeddings. Run it headless as just the gateway.
+3. **Off Grid Pro** — an always-on private layer that *sees* your work (screen → OCR),
+   *remembers* it, helps you *reflect*, and *acts* with your approval. On-device, opt-in.
 
 ## A look inside
 
 |  |  |
 |---|---|
-| **Chat** — text, vision, artifacts, on-device<br><img src="docs/screenshots/02-chat.png" alt="Chat" /> | **Models** — curated catalog + Hugging Face search<br><img src="docs/screenshots/01-models.png" alt="Models catalog" /> |
+| **Chat** — text, vision, reasoning, artifacts, on-device<br><img src="docs/screenshots/02-chat.png" alt="Chat" /> | **Models** — curated catalog + Hugging Face search<br><img src="docs/screenshots/01-models.png" alt="Models catalog" /> |
 | **The Gateway** — one local OpenAI-compatible API<br><img src="docs/screenshots/06-gateway.png" alt="Gateway" /> | **Projects** — group chats, RAG over your docs<br><img src="docs/screenshots/03-projects.png" alt="Projects" /> |
-| **Connectors (MCP)** — add servers, use them in chat<br><img src="docs/screenshots/05-integrations.png" alt="Connectors" /> | **Off Grid Pro** — the sees/remembers/acts layer (July 2026)<br><img src="docs/screenshots/07-pro-upgrade.png" alt="Pro" /> |
+| **Connectors (MCP)** — add servers, use them in chat<br><img src="docs/screenshots/05-integrations.png" alt="Connectors" /> | **Off Grid Pro** — the sees/remembers/reflects/acts layer<br><img src="docs/screenshots/07-pro-upgrade.png" alt="Pro" /> |
 
 ## Features (free & open source)
 
-- **Chat** — text + vision, streaming, with a reasoning ("thinking") mode.
-- **Image generation** — text→image and image→image via stable-diffusion.cpp (SDXL, etc.).
-- **Voice** — speech-to-text (whisper) and text-to-speech (Kokoro), plus a hands-free voice mode.
-- **Projects** — group chats, upload documents (txt/md/PDF/DOCX, audio, video) and chat grounded in them (RAG); per-project instructions.
-- **Artifacts** — generate and preview HTML, React, SVG, Mermaid diagrams, and Markdown documents in a sandboxed canvas; saved per chat & project.
-- **Connectors (MCP)** — add Model Context Protocol servers (none / token / OAuth), use them right inside chat. Preset catalog included.
-- **Model catalog** — curated, size-bucketed recommendations + direct Hugging Face search; download, manage, and set the active model per modality.
+The free, open app is a complete on-device AI studio:
+
+- **Chat** — text + vision, streaming, with a reasoning ("thinking") mode and per-chat
+  model settings (temperature, context window).
+- **Image generation** — text→image and image→image via `stable-diffusion.cpp` (Metal).
+  Ships **SDXL-Lightning** (few-step, fast), SDXL, SD 1.5/2.1, and **Z-Image-Turbo**
+  (2026 flagship, ~8-step). Live per-step preview, progress + ETA, cancel, lightbox, and
+  an artifacts gallery of everything you've generated.
+- **Voice** — speech-to-text (whisper) and text-to-speech (**Kokoro-82M**, multilingual),
+  plus a hands-free voice mode.
+- **Artifacts / canvas** — the model's HTML, React/JSX, SVG, Mermaid, and Markdown render
+  live in a sandboxed iframe (no network/file access); Code/Preview toggle, download,
+  saved per chat & project.
+- **Projects** — group chats, upload documents (txt/md/PDF/DOCX, image, audio, video) and
+  chat grounded in them (RAG with cited sources); per-project instructions.
+- **Tools in chat** — an agentic loop calls built-in local tools (calculator, datetime)
+  mid-conversation; MCP connector tools are next.
+- **Connectors (MCP)** — add Model Context Protocol servers (none / token / OAuth) and use
+  them right inside chat. Preset catalog included.
+- **Model catalog** — curated, size-bucketed recommendations + direct Hugging Face search;
+  download, manage, and set the active model per modality.
 - **The Gateway** — one OpenAI-compatible endpoint for everything; see below.
 - **Auto-update** — signed releases update themselves.
+
+A full breakdown is in [docs/FEATURES.md](docs/FEATURES.md).
 
 ## The Gateway
 
@@ -88,22 +111,64 @@ print(client.chat.completions.create(model="local",
 
 Interactive API reference + an OpenAPI spec are served at `/docs` and `/openapi.json`.
 Run **just the gateway** (no UI/capture) with `OFFGRID_SERVER_ONLY=1` (or `--server-only`).
+The same gateway is the policy-enforcing chokepoint when a device is governed by
+[Off Grid Console](#off-grid-for-teams--the-console).
 
-## Off Grid Pro — coming July 2026
+## Off Grid Pro — the sees / remembers / reflects / acts layer
 
-The free app **runs** models. **Pro** adds the layer that *sees, remembers, and acts* —
-always on, on-device:
+The free app **runs** models. **Pro** adds the always-on layer that turns your own work
+into private, on-device memory — and an assistant that helps you act on it. Everything is
+explicit opt-in, with a visible recording indicator, and nothing leaves the device.
 
-- **Never forgets** — it quietly remembers everything you see and do.
-- **Unified search** — find anything across your captured activity, meetings, and connectors.
-- **Private CRM** — people, projects, and companies, auto-built with cross-source summaries.
-- **Day · Reflect · Replay** — your day planned, where your time goes, rewind your screen.
-- **Meetings** — record + transcribe locally.
-- **Proactive secretary** — surfaces what matters and drafts actions (approval-gated).
-- **Skills automation** — trigger → action (schedule / keyword / event).
+- **Sees** — screen capture → OCR → on-device LLM distill into observations + entities.
+  Multi-monitor aware, consumption-vs-work classification, blank/locked frames skipped.
+- **Remembers** — **Day** (a persisted journal with time blocks), **Entities** (a private
+  CRM-for-everything: people, projects, companies, auto-built with synthesis summaries),
+  and **Replay** (a "movie of your day" you can scrub and play back).
+- **Reflects** — mind-share, balance, context-switching, and Day/Week trends.
+- **Meetings** — records **Google Meet + Zoom** (screen + system audio + mic), transcribes
+  locally with whisper, and folds an LLM title/summary/attendees into your timeline.
+- **Acts (with approval)** — action items detected from your communication, an
+  approval queue + audit log (nothing executes without a logged approval), MCP connectors
+  as authoritative sources, and a skills framework (trigger → action) — on the roadmap
+  toward a proactive secretary and a prospective "Ahead" view of your day.
+
+Pro features live in a separate **private** package (a `pro/` submodule); the open core
+never imports it — see [Architecture](#architecture--open-core).
 
 → **[Join early access](https://getoffgridai.co/early-access/)** (free) — or
-**[pay now](https://getoffgridai.co/pay)** for lifetime free + first access when Pro ships.
+**[pay now](https://getoffgridai.co/pay)** for lifetime free + first access.
+
+## Off Grid for teams — the Console
+
+Off Grid AI Desktop is also a **node in a fleet**. For organizations that need AI without
+sending data to the cloud, the [**Off Grid Console**](../console) is a self-hostable,
+single-tenant control plane that governs every desktop/mobile node from one place — while
+each node keeps enforcing policy and running inference **locally**.
+
+The split is deliberate: the **node** enforces and emits; the **Console** defines and
+observes. The Console pushes policy / config / SOPs *down* to the fleet and aggregates
+audit / telemetry / distilled learnings *up* — it never runs the intelligence or sees raw
+capture. Each device enrolls (Settings → Fleet Console), pulls its policy bundle, and the
+local gateway becomes the chokepoint that enforces it.
+
+It's **modular and API-first** — a customer buys any subset (just the API, just the Brain
+RAG pipeline, just the agents, or the whole plane). The Console spans five planes:
+
+- **Control** — gateway policy (cloud-egress leash, guardrails, allowed models), conditional
+  model routing (keep PII/regulated traffic on-device), RBAC/ABAC, and an append-only audit log.
+- **Data** — connectors to org DBs/warehouses/SaaS, ingest jobs, PII/masking rules, a data
+  catalog, and retention/erasure (DSAR).
+- **AI (Brain)** — the ingestion→retrieval (RAG) pipeline (parse → chunk → embed → index →
+  retrieve → cite), grounding + evals, a tool/agent registry, and traced agent runs.
+- **FinOps** — virtual keys with budgets, cost attribution by team/project/model, and the
+  "local dividend" (on-device = $0).
+- **Regulatory (DPO)** — live framework coverage (DPDP / EU AI Act / ISO 42001 / GDPR /
+  NIST / HIPAA …), a governance registry, and one-click regulator/DPIA export packs.
+
+The wedge: **truly-local AI that an org can still govern and prove** — answer a regulator
+with live evidence, attribute cost, and guarantee sensitive data never left the device. See
+[`docs/CONSOLE_PLAN.md`](docs/CONSOLE_PLAN.md) and [`docs/ENTERPRISE_BUILD_PLAN.md`](docs/ENTERPRISE_BUILD_PLAN.md).
 
 ## Install
 
@@ -112,8 +177,7 @@ Grab the latest build from [Releases](https://github.com/off-grid-ai/desktop/rel
 - **macOS** (Apple Silicon) — signed + notarized `.dmg`
 - **Windows** (x64) — `.exe` installer
 
-Linux (AppImage/deb) is in progress. A full breakdown of everything the app does is in
-[docs/FEATURES.md](docs/FEATURES.md).
+Linux (AppImage/deb) is in progress.
 
 ## Build from source
 
@@ -126,23 +190,26 @@ npm run gateway      # headless gateway only (:7878)
 npm run build:mac    # package a macOS app
 ```
 
-Stack: Electron + React 19 + Tailwind v4 (electron-vite), `better-sqlite3-multiple-ciphers`
-(encrypted local DB), `@lancedb/lancedb` (vectors), bundled `llama.cpp` / `whisper.cpp` /
-`stable-diffusion.cpp` / `ffmpeg` in `resources/bin`. Shared `@offgrid/*` packages (design,
-models, rag) come from the workspace.
+Stack: Electron 39 + React 19 + Tailwind v4 (electron-vite),
+`better-sqlite3-multiple-ciphers` (encrypted local DB), `@lancedb/lancedb` (vectors),
+bundled `llama.cpp` / `whisper.cpp` / `stable-diffusion.cpp` / `ffmpeg` in `resources/bin`.
+Shared `@offgrid/*` packages (design, models, rag) come from the workspace. Verify changes
+with `npm run typecheck` before declaring done.
 
 ## Architecture — open core
 
-This repository is the **open, AGPL core**: the model runner, gateway, chat, projects,
-artifacts, connectors, and the model catalog. Pro features live in a separate **private**
-package loaded as a git submodule (`pro/`). The core **never imports pro** — pro registers
-itself through small registries (an `activate()` pattern) and is simply absent in this build,
-so the open app compiles and runs entirely on its own.
+This repository is the **open, AGPL core**: the model runner, gateway, studio (chat,
+image, voice, artifacts), projects, connectors, and the model catalog. Pro features live in
+a separate **private** package loaded as a git submodule (`pro/`). The core **never imports
+pro** — pro registers itself through small registries (an `activate()` pattern) and is
+simply absent in this build, so the open app compiles and runs entirely on its own.
 
 ## Privacy
 
-All model inference is local. Your conversations, documents, and models stay on your device
-— there's no cloud inference, no account, and no API key. You can run it fully offline.
+All model inference is local. Your conversations, documents, captured activity, and models
+stay on your device — there's no cloud inference, no account, and no API key. You can run it
+fully offline. Even under fleet governance, the Console receives distilled audit and
+learnings, never raw capture.
 
 ## License
 
