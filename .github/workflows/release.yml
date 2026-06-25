@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.bump.outputs.version }}
+      sha: ${{ steps.bump.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,6 +40,10 @@ jobs:
           git add package.json package-lock.json
           git commit -m "chore: bump version to $VERSION [skip ci]"
           git push
+          # Pin the build to THIS exact commit, not floating main — otherwise a
+          # concurrent push's bump can advance main and the build publishes a
+          # mismatched/duplicate release (the version race that tangled v0.0.20/.21).
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   # Build + publish per-OS natively (native modules + platform binaries differ).
   build:
@@ -53,7 +58,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main # the just-bumped commit
+          ref: ${{ needs.version.outputs.sha }} # the exact bumped commit, not floating main
           fetch-depth: 0
           lfs: true # resources/bin/* (llama-server, sd-cli, whisper, ffmpeg, dylibs)
                     # are Git LFS — without this, CI bundles 131-byte pointer stubs
