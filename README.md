@@ -60,7 +60,11 @@ Three things in one app:
 </tr>
 <tr>
 <td width="50%"><strong>Connectors (MCP)</strong> — add servers, use them in chat<br><img src="docs/screenshots/05-integrations.png" width="100%" alt="Connectors" /></td>
+<td width="50%"><strong>Artifacts</strong> — HTML, React, SVG &amp; Mermaid in a local sandbox<br><img src="docs/screenshots/09-artifacts.png" width="100%" alt="Artifacts" /></td>
+</tr>
+<tr>
 <td width="50%"><strong>Off Grid Pro</strong> — the sees/remembers/reflects/acts layer<br><img src="docs/screenshots/07-pro-upgrade.png" width="100%" alt="Pro" /></td>
+<td width="50%"><strong>Private by default</strong> — runs on your machine, no account<br><img src="docs/screenshots/08-onboarding.png" width="100%" alt="Private by default" /></td>
 </tr>
 </table>
 
