@@ -144,6 +144,23 @@ Pro launches **July 2026** — already paid? You're first in line when it ships.
 live in a separate **private** package (a `pro/` submodule); the open core never imports it —
 see [Architecture](#architecture--open-core).
 
+<table>
+<tr>
+<td width="50%"><strong>Day</strong> — your day, planned from real activity<br><img src="docs/screenshots/pro-day.png" width="100%" alt="Day" /></td>
+<td width="50%"><strong>Entities</strong> — a private CRM, auto-built<br><img src="docs/screenshots/pro-entities.png" width="100%" alt="Entities" /></td>
+</tr>
+<tr>
+<td width="50%"><strong>Reflect</strong> — where your attention actually went<br><img src="docs/screenshots/pro-reflect.png" width="100%" alt="Reflect" /></td>
+<td width="50%"><strong>Search</strong> — unified search across everything<br><img src="docs/screenshots/pro-search.png" width="100%" alt="Unified search" /></td>
+</tr>
+<tr>
+<td width="50%"><strong>Meetings</strong> — recorded + transcribed locally<br><img src="docs/screenshots/pro-meetings.png" width="100%" alt="Meetings" /></td>
+<td width="50%"><strong>Replay</strong> — rewind your screen like a film<br><img src="docs/screenshots/pro-replay.png" width="100%" alt="Replay" /></td>
+</tr>
+</table>
+
+<sub>Pro screens shown with synthetic demo data.</sub>
+
 → **[Join early access](https://getoffgridai.co/early-access/)** (free) — or
 **[pay now](https://getoffgridai.co/pay)** for lifetime free + first access.
 
