@@ -55,6 +55,11 @@ jobs:
         with:
           ref: main # the just-bumped commit
           fetch-depth: 0
+          lfs: true # resources/bin/* (llama-server, sd-cli, whisper, ffmpeg, dylibs)
+                    # are Git LFS — without this, CI bundles 131-byte pointer stubs
+                    # and every runtime spawn fails with ENOEXEC.
+      - name: Pull LFS binaries
+        run: git lfs pull
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
