@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, app } from 'electron';
 import { getDB, getChatSessions, upsertChatSummary, getMemoriesForSession, getMemoryRecordsForSession, getMasterMemory, updateMasterMemory, getAllChatSummaries, upsertEntity, addEntityFact, updateEntitySummary, getEntities, getEntityDetails, upsertEntitySession, rebuildEntityEdgesForSession, getEntityGraph, rebuildEntityEdgesForAllSessions, deleteEntity, deleteMemory, getEntitiesForSession, getDashboardStats, getUserProfile, saveUserProfile, UserProfile, createRagConversation, getRagConversations, getRagConversation, deleteRagConversation, addRagMessage, getRagMessages, updateRagConversationTitle, getSettings, saveSetting, getSetting } from './database';
 import { embeddings } from './embeddings';
 import { getPermissionStatus, requestAccessibilityPermission, requestScreenRecordingPermission, openAccessibilitySettings, openScreenRecordingSettings } from './permissions';
@@ -1096,6 +1096,9 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
   ipcMain.handle('settings:get', () => {
       return getSettings();
   });
+
+  // App version (for the Settings footer — so users know what build they're on).
+  ipcMain.handle('app:version', () => app.getVersion());
 
   ipcMain.handle('settings:save', (_, key: string, value: any) => {
       saveSetting(key, value);

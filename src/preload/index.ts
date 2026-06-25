@@ -130,7 +130,8 @@ try {
     requestScreenRecordingPermission: () => ipcRenderer.invoke('permissions:request-screen-recording'),
     openAccessibilitySettings: () => ipcRenderer.invoke('permissions:open-accessibility-settings'),
     openScreenRecordingSettings: () => ipcRenderer.invoke('permissions:open-screen-recording-settings'),
-    
+    getAppVersion: () => ipcRenderer.invoke('app:version'),
+
     // Model Download APIs
     checkModelStatus: () => ipcRenderer.invoke('model:check-status'),
     downloadModels: () => ipcRenderer.invoke('model:download'),

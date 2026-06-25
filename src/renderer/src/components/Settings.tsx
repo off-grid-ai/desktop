@@ -243,6 +243,12 @@ export function Settings() {
   const isPro = !!(window as any).api?.isPro;
   const [idName, setIdName] = useState('');
   const [idEmail, setIdEmail] = useState('');
+  const [appVersion, setAppVersion] = useState('');
+
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window.api as any).getAppVersion?.().then((v: string) => setAppVersion(v || '')).catch(() => {});
+  }, []);
 
   // Load identity on mount (Pro only — the handler lives in the pro layer).
   useEffect(() => {
@@ -314,6 +320,12 @@ export function Settings() {
           {isPro ? <ProactiveSection /> : <ProPlaceholder title="Proactive delivery" description="A morning briefing and a heads-up before each meeting — native notifications, even when the window is closed." />}
           {isPro ? <SecretaryPrefs /> : <ProPlaceholder title="What Off Grid has learned" description="Preferences distilled from the suggestions you dismiss, fed back to your assistant so it gets sharper over time." />}
           {isPro ? <ConsoleSection /> : <ProPlaceholder title="Fleet Console" description="Optionally enroll this device in an Off Grid Console for org policy, fleet audit, and remote commands — fully local." />}
+
+          {/* Version footer — so you always know which build you're on. */}
+          <div className="flex items-center justify-center gap-2 pt-2 text-xs text-neutral-600">
+            <span className="font-medium text-neutral-500">Off Grid AI</span>
+            {appVersion && <span>v{appVersion}</span>}
+          </div>
         </motion.div>
       </div>
 
