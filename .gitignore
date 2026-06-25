@@ -36,3 +36,7 @@ resources/bin/
 # Vendored @offgrid packages ship their built dist
 !packages/*/dist/
 !packages/*/dist/**
+
+# Local env (telemetry/keys) — never commit
+.env
+.env.local

@@ -41,7 +41,6 @@ import {
   IconArrowRight
 } from '@tabler/icons-react';
 import { cn } from './lib/utils';
-import { usePostHog } from 'posthog-js/react';
 
 type ViewMode = 'dashboard' | 'day' | 'replay' | 'reflect' | 'actions' | 'connectors' | 'meetings' | 'chats' | 'memories' | 'entities' | 'graph' | 'memory-chat' | 'models' | 'gateway' | 'projects' | 'notifications' | 'settings' | 'search';
 
@@ -98,8 +97,6 @@ function ReprocessingBanner() {
 }
 
 function AppContent() {
-
-  const posthog = usePostHog()
   const { addNotification } = useNotifications();
 
   // Pro entitlement (preload reads OFFGRID_PRO; absent submodule => false at runtime).
@@ -461,7 +458,6 @@ function AppContent() {
       <button
         key={item.view}
         onClick={() => {
-          posthog.capture('button_clicked', { button_name: 'navigation_' + item.view })
           setViewMode(item.view); setSelectedSessionId(null); setSelectedMemoryId(null); setSelectedEntityId(null); setReplayTarget(null);
         }}
         title={!sidebarOpen ? item.label : undefined}

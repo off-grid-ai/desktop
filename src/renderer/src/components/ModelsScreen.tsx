@@ -231,7 +231,8 @@ export function ModelsScreen() {
   // (Kokoro/Piper onnx) are curated-catalogue only — most HF ASR/TTS repos are
   // incompatible formats, so a free search would mostly surface undownloadables.
   const searchEnabled = activeKind !== 'voice' && activeKind !== 'transcription';
-  const list = models.filter((m) => m.kind === activeKind);
+  // Vision models also do text, so surface them under the Text tab too.
+  const list = models.filter((m) => m.kind === activeKind || (activeKind === 'text' && m.kind === 'vision'));
   const searchingMode = searchEnabled && query.trim().length >= 2;
 
   // Map HF results into FilterableModel, then apply the shared filter/sort.

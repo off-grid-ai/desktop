@@ -139,10 +139,12 @@ export class LLMService {
     this.resolveModel();
   }
 
-  // Check if the active model's files are present (mmproj only if it has one).
+  // A model is "ready" once its PRIMARY weights are present. mmproj is optional —
+  // it only adds image input; a vision model still runs text without it. (Gating
+  // on mmproj wrongly kept "Setup Required" up for an activated vision model.)
   modelsExist(): boolean {
     this.resolveModel();
-    return fs.existsSync(this.modelPath) && (!this.mmProjPath || fs.existsSync(this.mmProjPath));
+    return fs.existsSync(this.modelPath);
   }
 
   getModelsDir(): string {
