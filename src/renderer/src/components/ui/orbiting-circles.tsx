@@ -50,8 +50,12 @@ export function OrbitingCircles({
       )}
       {React.Children.map(children, (child, index) => {
         const angle = (360 / childCount) * index;
-        const animationDelay = -delay * index;
-        
+        // Distribute by --angle ONLY. A per-index animationDelay would ALSO shift
+        // each child along the orbit, and with common delay/duration combos that
+        // offset nearly cancels the angle spacing — collapsing the ring into a
+        // pile. Keep delay at 0 so the cards stay evenly spaced as the ring turns.
+        void delay;
+
         return (
           <div
             style={{
@@ -59,7 +63,7 @@ export function OrbitingCircles({
               width: iconSize,
               height: iconSize,
               animation: `orbit ${calculatedDuration}s linear infinite ${reverse ? 'reverse' : 'normal'}`,
-              animationDelay: `${animationDelay}s`,
+              animationDelay: '0s',
               // Start position - each icon at different angle
               transform: `rotate(${angle}deg) translateY(-${radius}px) rotate(-${angle}deg)`,
               // CSS custom properties for keyframes
