@@ -12,6 +12,7 @@ import {
   IconDeviceFloppy,
   IconMessage,
   IconSettings,
+  IconLayoutGrid,
 } from '@tabler/icons-react';
 import { ArtifactCanvas, type Artifact } from './ArtifactCanvas';
 
@@ -25,17 +26,29 @@ function ProjectArtifacts({ projectId }: { projectId: string }): React.ReactElem
   useEffect(() => {
     (async () => { try { setItems((await api.listArtifacts?.({ projectId })) || []); } catch { /* ignore */ } })();
   }, [projectId]);
+  const KIND_LABEL: Record<string, string> = { html: 'HTML', svg: 'SVG', mermaid: 'Diagram', react: 'React', text: 'Document', image: 'Image' };
   return (
-    <div>
-      <div className="mb-3 text-[11px] uppercase tracking-wide text-neutral-500">Artifacts</div>
+    <div className="w-full px-8 py-6">
+      <div className="mb-5 text-[11px] uppercase tracking-widest text-neutral-600">
+        {items.length} {items.length === 1 ? 'artifact' : 'artifacts'}
+      </div>
       {items.length === 0 ? (
-        <p className="text-sm text-neutral-600">No artifacts yet — generate HTML, React, SVG, or docs in a chat scoped to this project and they’ll appear here.</p>
+        <p className="py-10 text-center text-sm text-neutral-600">
+          No artifacts yet — generate HTML, React, SVG, Mermaid, or docs in a chat scoped to this project and they’ll appear here.
+        </p>
       ) : (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {items.map((a) => (
-            <button key={a.id} onClick={() => setOpen(a)} className="flex items-center gap-3 rounded-md border border-neutral-800 bg-neutral-900/60 p-3 text-left transition-colors hover:border-green-500/50">
-              <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase text-green-400">{a.kind}</span>
-              <span className="min-w-0 flex-1 truncate text-sm text-neutral-200">{a.title}</span>
+            <button
+              key={a.id}
+              onClick={() => setOpen(a)}
+              className="group flex flex-col gap-2 rounded-lg border border-neutral-800/80 bg-neutral-900/30 p-4 text-left transition-colors hover:border-green-500/50 hover:bg-neutral-900/60"
+            >
+              <div className="flex items-center justify-between">
+                <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-green-400">{KIND_LABEL[a.kind] ?? a.kind}</span>
+                <span className="text-[10px] text-neutral-600">{a.created ? timeAgo(new Date(a.created).toISOString()) : ''}</span>
+              </div>
+              <span className="min-w-0 truncate text-sm text-neutral-200 group-hover:text-white">{a.title}</span>
             </button>
           ))}
         </div>
@@ -105,7 +118,7 @@ export function ProjectsScreen({ onOpenChat }: ProjectsScreenProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
-  const [view, setView] = useState<'chat' | 'config'>('chat');
+  const [view, setView] = useState<'chat' | 'artifacts' | 'config'>('chat');
 
   const refreshProjects = useCallback(async () => {
     const list = (await api.listProjects?.()) ?? [];
@@ -214,6 +227,14 @@ export function ProjectsScreen({ onOpenChat }: ProjectsScreenProps) {
                 <IconMessage className="h-3.5 w-3.5" /> Chats
               </button>
               <button
+                onClick={() => setView('artifacts')}
+                className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs transition-colors ${
+                  view === 'artifacts' ? 'bg-neutral-800 text-white' : 'text-neutral-500 hover:text-neutral-300'
+                }`}
+              >
+                <IconLayoutGrid className="h-3.5 w-3.5" /> Artifacts
+              </button>
+              <button
                 onClick={() => setView('config')}
                 className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs transition-colors ${
                   view === 'config' ? 'bg-neutral-800 text-white' : 'text-neutral-500 hover:text-neutral-300'
@@ -226,6 +247,8 @@ export function ProjectsScreen({ onOpenChat }: ProjectsScreenProps) {
 
           {view === 'chat' ? (
             <ProjectChats key={active.id} project={active} onOpenChat={onOpenChat} />
+          ) : view === 'artifacts' ? (
+            <ProjectArtifacts key={active.id} projectId={active.id} />
           ) : (
             <ProjectConfig
               key={active.id}
@@ -411,10 +434,6 @@ function ProjectConfig({
 
         <div className="border-t border-neutral-800 pt-6">
           <KnowledgeBase projectId={project.id} />
-        </div>
-
-        <div className="border-t border-neutral-800 pt-6">
-          <ProjectArtifacts projectId={project.id} />
         </div>
       </div>
     </div>
