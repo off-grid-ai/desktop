@@ -123,7 +123,38 @@ print(client.chat.completions.create(model="local",
 ```
 
 Interactive API reference + an OpenAPI spec are served at `/docs` and `/openapi.json`.
-Run **just the gateway** (no UI/capture) with `OFFGRID_SERVER_ONLY=1` (or `--server-only`).
+
+### Run just the gateway (headless)
+
+You don't need the desktop UI to serve models — run **only** the gateway (no UI, no
+capture) and point any OpenAI client at it. Ideal for a server, a homelab box, or wiring
+local models into your own apps:
+
+```bash
+# from a built app
+/Applications/Off\ Grid\ AI.app/Contents/MacOS/Off\ Grid\ AI --server-only
+# or from source
+OFFGRID_SERVER_ONLY=1 npm run gateway
+```
+
+It's **self-sufficient** — manage models over HTTP, no UI required:
+
+| Action | Endpoint |
+|---|---|
+| List the catalog | `GET /v1/models/catalog` |
+| List installed | `GET /v1/models/installed` |
+| Active model per modality | `GET /v1/models/active` |
+| **Pull** a model | `POST /v1/models/pull` `{ "id": "…" }` → poll `GET /v1/models/pull/status?id=…` |
+| **Activate** a model | `POST /v1/models/activate` `{ "id": "…", "kind"?: "image\|speech\|transcription" }` |
+| **Delete** a model | `POST /v1/models/delete` `{ "id": "…" }` |
+
+```bash
+# pull a model into a headless gateway, then chat
+curl -X POST http://127.0.0.1:7878/v1/models/pull \
+  -H 'Content-Type: application/json' -d '{"id":"unsloth/gemma-4-E4B-it-GGUF"}'
+curl -X POST http://127.0.0.1:7878/v1/models/activate \
+  -H 'Content-Type: application/json' -d '{"id":"unsloth/gemma-4-E4B-it-GGUF"}'
+```
 
 ## Off Grid Pro — coming July 2026
 
