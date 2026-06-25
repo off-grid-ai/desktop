@@ -267,29 +267,34 @@ function ProjectChats({
   }, [project.id]);
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-6">
-      <button
-        onClick={() => onOpenChat({ projectId: project.id })}
-        className="mb-5 flex w-full items-center justify-center gap-2 rounded-md border border-neutral-800 px-3 py-2.5 text-sm text-neutral-300 transition-colors hover:border-green-500 hover:text-green-500"
-      >
-        <IconPlus className="h-4 w-4" /> New chat
-      </button>
+    <div className="w-full px-8 py-6">
+      <div className="mb-5 flex items-center justify-between">
+        <span className="text-[11px] uppercase tracking-widest text-neutral-600">
+          {chats.length} {chats.length === 1 ? 'chat' : 'chats'}
+        </span>
+        <button
+          onClick={() => onOpenChat({ projectId: project.id })}
+          className="flex items-center gap-2 rounded-md border border-neutral-800 px-3 py-2 text-sm text-neutral-300 transition-colors hover:border-green-500 hover:text-green-500"
+        >
+          <IconPlus className="h-4 w-4" /> New chat
+        </button>
+      </div>
       {chats.length === 0 ? (
         <p className="py-10 text-center text-sm text-neutral-600">
           No chats in this project yet. Start one above — it opens in the Chat screen, grounded in this project.
         </p>
       ) : (
-        <div className="flex flex-col">
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {chats.map((c) => (
             <button
               key={c.id}
               onClick={() => onOpenChat({ conversationId: c.id })}
-              className="group flex items-center gap-3 border-b border-neutral-900 px-2 py-3 text-left transition-colors hover:bg-neutral-900/40"
+              className="group flex items-start gap-3 rounded-lg border border-neutral-800/80 bg-neutral-900/30 px-4 py-3.5 text-left transition-colors hover:border-green-500/50 hover:bg-neutral-900/60"
             >
-              <IconMessage className="h-4 w-4 shrink-0 text-neutral-600" />
+              <IconMessage className="mt-0.5 h-4 w-4 shrink-0 text-neutral-600 group-hover:text-green-500" />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm text-neutral-200">{c.title || 'Untitled chat'}</div>
-                <div className="text-[11px] text-neutral-600">
+                <div className="mt-0.5 text-[11px] text-neutral-600">
                   {c.message_count ? `${c.message_count} messages · ` : ''}
                   {timeAgo(c.updated_at)}
                 </div>

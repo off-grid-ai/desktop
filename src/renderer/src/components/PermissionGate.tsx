@@ -48,6 +48,10 @@ export function PermissionGate({ children }: PermissionGateProps) {
   const [isChecking, setIsChecking] = useState(true);
   const [modelStatus, setModelStatus] = useState<{ downloaded: boolean; modelsDir: string } | null>(null);
   const [showModels, setShowModels] = useState(false);
+  // Pro setup is NON-blocking: users go straight into the shell to look around.
+  // The detailed setup screen opens on demand; a slim nudge can be dismissed.
+  const [showSetup, setShowSetup] = useState(false);
+  const [setupDismissed, setSetupDismissed] = useState(false);
 
   // Capture permissions (Accessibility + Screen Recording) are only needed by the
   // Pro "sees" layer. The free build runs chat/projects/models and gates on the
@@ -147,12 +151,8 @@ export function PermissionGate({ children }: PermissionGateProps) {
     return children;
   }
 
-  // Pro: ready when capture permissions are granted and a model is present.
-  if (permsOk && modelStatus?.downloaded) {
-    return (
-      children
-    );
-  }
+  // Pro is ready when capture permissions are granted and a model is present.
+  const ready = permsOk && !!modelStatus?.downloaded;
 
   // Browse the full model catalog (text, vision, image, voice, transcription).
   // Downloading + Using a text/vision model flips modelStatus and opens the app.
@@ -172,11 +172,35 @@ export function PermissionGate({ children }: PermissionGateProps) {
     );
   }
 
-  // Setup required - show permission/model request UI
+  // Default (NON-blocking): drop straight into the shell so people can look around.
+  // Show a slim, dismissible nudge when capture perms or a model are still missing.
+  if (ready || !showSetup) {
+    return (
+      <>
+        {children}
+        {!ready && !setupDismissed && (
+          <SetupNudge
+            missingPerms={!permsOk}
+            missingModel={!modelStatus?.downloaded}
+            onOpen={() => setShowSetup(true)}
+            onDismiss={() => setSetupDismissed(true)}
+          />
+        )}
+      </>
+    );
+  }
+
+  // Detailed setup screen — opened on demand from the nudge (no longer a hard wall).
   return (
     <div className="h-screen w-screen bg-neutral-950 fixed inset-0 overflow-hidden">
       <StarsBackground className="absolute inset-0 z-0" />
       <ShootingStars className="absolute inset-0 z-0" />
+      <button
+        onClick={() => setShowSetup(false)}
+        className="absolute left-4 top-4 z-20 flex items-center gap-1 text-sm text-neutral-400 transition-colors hover:text-white"
+      >
+        ← Back to app
+      </button>
 
       <div className="relative z-10 h-full w-full flex flex-col items-center overflow-y-auto pt-16 pb-8 px-8">
         <motion.div
@@ -334,6 +358,52 @@ export function PermissionGate({ children }: PermissionGateProps) {
         </motion.div>
       </div>
     </div>
+  );
+}
+
+// Slim, dismissible setup nudge shown over the shell when Pro setup is incomplete.
+// Non-blocking: people can explore the whole app and finish setup whenever.
+function SetupNudge({
+  missingPerms,
+  missingModel,
+  onOpen,
+  onDismiss,
+}: {
+  missingPerms: boolean;
+  missingModel: boolean;
+  onOpen: () => void;
+  onDismiss: () => void;
+}) {
+  const parts: string[] = [];
+  if (missingModel) parts.push('download a model');
+  if (missingPerms) parts.push('grant capture permissions');
+  const detail = parts.join(' · ');
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
+      className="fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-xl border border-green-500/30 bg-neutral-900/95 px-4 py-3 shadow-xl backdrop-blur-xl"
+    >
+      <Cpu className="h-4 w-4 shrink-0 text-green-500" />
+      <div className="text-xs leading-tight">
+        <div className="font-medium text-white">Finish setting up Off Grid Pro</div>
+        {detail && <div className="text-neutral-500">To capture &amp; remember, {detail}.</div>}
+      </div>
+      <button
+        onClick={onOpen}
+        className="ml-1 whitespace-nowrap rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-green-500"
+      >
+        Set up
+      </button>
+      <button
+        onClick={onDismiss}
+        aria-label="Dismiss"
+        className="rounded-md p-1 text-neutral-500 transition-colors hover:text-white"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </motion.div>
   );
 }
 
