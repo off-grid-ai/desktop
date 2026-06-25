@@ -128,7 +128,14 @@ function mapRagMessages(raw: any[]): ChatMessage[] {
   });
 }
 
+// Core (free) suggestions — generic chat/build/image. Pro adds memory-aware ones.
 const ASK_EXAMPLES = [
+  'Explain how RAG works, simply',
+  'Write a Python function to dedupe a list',
+  'Draft a friendly out-of-office email',
+  'Generate an image of a mountain cabin at dawn',
+];
+const ASK_EXAMPLES_PRO = [
   'What did I work on today?',
   'Summarize my last meeting',
   'What have I spent the most time on this week?',
@@ -1010,7 +1017,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
     }
   }, [addFiles]);
 
-  const examples = mode === 'image' ? IMAGE_EXAMPLES : ASK_EXAMPLES;
+  const examples = mode === 'image' ? IMAGE_EXAMPLES : (isPro ? ASK_EXAMPLES_PRO : ASK_EXAMPLES);
 
   // Slash-command autocomplete: typing "/" (before any space) lists matching skills.
   const slashQuery = mode === 'ask' && input.startsWith('/') && !/\s/.test(input) ? input.slice(1).toLowerCase() : null;
@@ -1219,7 +1226,9 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
                     ? 'Pick a style, then describe your subject — generated on-device.'
                     : activeProjectName
                       ? `Grounded in the “${activeProjectName}” knowledge base.`
-                      : 'Ask across your memories, chats, and entities from every source.'}
+                      : isPro
+                        ? 'Ask across your memories, chats, and entities from every source.'
+                        : 'Ask anything, generate images, or build — all on-device.'}
                 </p>
                 {mode === 'image' ? (
                   <div className="mt-4 w-full">

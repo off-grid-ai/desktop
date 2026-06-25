@@ -40,6 +40,14 @@ It's also an **OpenAI-compatible gateway**: point any OpenAI client at
 `http://127.0.0.1:7878/v1` (no key) and call chat, vision, image, audio, and embeddings
 locally — or run it headless as just the gateway.
 
+## A look inside
+
+|  |  |
+|---|---|
+| **Chat** — text, vision, artifacts, on-device<br><img src="docs/screenshots/02-chat.png" alt="Chat" /> | **Models** — curated catalog + Hugging Face search<br><img src="docs/screenshots/01-models.png" alt="Models catalog" /> |
+| **The Gateway** — one local OpenAI-compatible API<br><img src="docs/screenshots/06-gateway.png" alt="Gateway" /> | **Projects** — group chats, RAG over your docs<br><img src="docs/screenshots/03-projects.png" alt="Projects" /> |
+| **Connectors (MCP)** — add servers, use them in chat<br><img src="docs/screenshots/05-integrations.png" alt="Connectors" /> | **Off Grid Pro** — the sees/remembers/acts layer (July 2026)<br><img src="docs/screenshots/07-pro-upgrade.png" alt="Pro" /> |
+
 ## Features (free & open source)
 
 - **Chat** — text + vision, streaming, with a reasoning ("thinking") mode.

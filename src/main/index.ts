@@ -31,6 +31,14 @@ app.setName('Off Grid AI')
 
 ;(function unifyUserDataPath(): void {
   try {
+    // Test/CI seam: let a harness isolate userData (e.g. screenshot capture of
+    // a fresh, pre-onboarding profile). Harmless in production (unset).
+    if (process.env.OFFGRID_USER_DATA) {
+      fs.mkdirSync(process.env.OFFGRID_USER_DATA, { recursive: true })
+      app.setPath('userData', process.env.OFFGRID_USER_DATA)
+      console.log('[userData] override path:', process.env.OFFGRID_USER_DATA)
+      return
+    }
     const appData = app.getPath('appData')
     const canonical = join(appData, 'Off Grid AI Desktop')
     fs.mkdirSync(canonical, { recursive: true })

@@ -3,6 +3,8 @@
 A deep dive on everything the free, open-source app does. All of it runs **on your
 device** — no cloud inference, no account, no API key.
 
+<p align="center"><img src="screenshots/08-onboarding.png" alt="Off Grid AI" width="720" /></p>
+
 - [The Gateway (local OpenAI-compatible API)](#the-gateway)
 - [Chat](#chat)
 - [Image generation](#image-generation)
@@ -22,6 +24,8 @@ device** — no cloud inference, no account, no API key.
 
 One local server — `http://127.0.0.1:7878` — exposes the **OpenAI API** for every model
 you've downloaded. Point any OpenAI SDK at `…/v1` with any (ignored) key.
+
+![Gateway](screenshots/06-gateway.png)
 
 | Capability | Method · Endpoint | Notes |
 |---|---|---|
@@ -52,6 +56,8 @@ curl http://127.0.0.1:7878/v1/images -H 'Content-Type: application/json' \
 
 ## Chat
 
+![Chat](screenshots/02-chat.png)
+
 - **Text + vision** with the active LLM; drop in images for multimodal prompts.
 - **Thinking mode** — toggle the model's reasoning on/off per chat.
 - **Streaming** responses with live token + reasoning display.
@@ -80,6 +86,8 @@ curl http://127.0.0.1:7878/v1/images -H 'Content-Type: application/json' \
 
 ## Projects (RAG)
 
+![Projects](screenshots/03-projects.png)
+
 - Group related chats; give a project **instructions** (a system prompt prepended to every
   chat in it).
 - **Knowledge base** — upload documents (txt, md, **PDF**, DOCX), images, audio, or video.
@@ -103,6 +111,8 @@ Generate and preview rich outputs in a sandboxed canvas:
 
 Use [Model Context Protocol](https://modelcontextprotocol.io) servers right inside chat.
 
+![Connectors](screenshots/05-integrations.png)
+
 - **Add your own** via three auth modes: **none**, **token** (stored in the OS keychain via
   `safeStorage`), or **OAuth** (browser flow).
 - **Preset catalogue** — one-tap setup for common servers.
@@ -111,6 +121,8 @@ Use [Model Context Protocol](https://modelcontextprotocol.io) servers right insi
 - Transports: hosted **HTTP** and local **stdio** servers.
 
 ## Models
+
+![Models](screenshots/01-models.png)
 
 - **Catalog** with curated, **size-bucketed** recommendations (≤2/4/6/8/16 GB) per modality
   (text, vision, image, voice, transcription) — compete-with-LM-Studio picks, with release
@@ -139,6 +151,8 @@ runs entirely on its own. A build-time flag (`__OFFGRID_PRO__`) decides whether 
 present, and `OFFGRID_PRO=0` simulates the free tier locally.
 
 ## Off Grid Pro — coming July 2026
+
+![Off Grid Pro — coming July 2026](screenshots/07-pro-upgrade.png)
 
 The free app **runs** models. **Pro** adds the always-on layer that **sees, remembers, and
 acts**, on-device:
