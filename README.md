@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="resources/icon.png" width="112" alt="Off Grid AI" />
+  <img src="resources/logo.png" width="112" alt="Off Grid AI" />
 </p>
 
 <h1 align="center">Off Grid AI</h1>
@@ -14,13 +14,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/off-grid-ai/desktop/releases/latest">Download for macOS</a> ·
+  <a href="https://github.com/off-grid-ai/desktop/releases/latest">Download (macOS · Windows)</a> ·
+  <a href="docs/FEATURES.md">Features</a> ·
   <a href="https://getoffgridai.co">getoffgridai.co</a> ·
   <a href="https://getoffgridai.co/early-access/">Pro early access</a>
 </p>
 
 <p align="center">
-  <img alt="platform" src="https://img.shields.io/badge/macOS-Apple%20Silicon-black" />
+  <img alt="platform" src="https://img.shields.io/badge/macOS%20%C2%B7%20Windows-black" />
   <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-blue" />
   <img alt="local" src="https://img.shields.io/badge/100%25-on--device-34D399" />
 </p>
@@ -98,8 +99,13 @@ always on, on-device:
 
 ## Install
 
-Download the latest **macOS** DMG from [Releases](https://github.com/off-grid-ai/desktop/releases/latest)
-(Apple Silicon, signed + notarized). Windows and Linux builds are in progress.
+Grab the latest build from [Releases](https://github.com/off-grid-ai/desktop/releases/latest):
+
+- **macOS** (Apple Silicon) — signed + notarized `.dmg`
+- **Windows** (x64) — `.exe` installer
+
+Linux (AppImage/deb) is in progress. A full breakdown of everything the app does is in
+[docs/FEATURES.md](docs/FEATURES.md).
 
 ## Build from source
 
