@@ -72,8 +72,8 @@ The free, open app is a complete on-device AI studio:
   saved per chat & project.
 - **Projects** — group chats, upload documents (txt/md/PDF/DOCX, image, audio, video) and
   chat grounded in them (RAG with cited sources); per-project instructions.
-- **Tools in chat** — an agentic loop calls built-in local tools (calculator, datetime)
-  mid-conversation; MCP connector tools are next.
+- **Tools in chat** — an agentic loop calls local tools mid-conversation: built-ins
+  (calculator, datetime) plus any MCP connector you've added.
 - **Connectors (MCP)** — add Model Context Protocol servers (none / token / OAuth) and use
   them right inside chat. Preset catalog included.
 - **Model catalog** — curated, size-bucketed recommendations + direct Hugging Face search;
@@ -111,10 +111,8 @@ print(client.chat.completions.create(model="local",
 
 Interactive API reference + an OpenAPI spec are served at `/docs` and `/openapi.json`.
 Run **just the gateway** (no UI/capture) with `OFFGRID_SERVER_ONLY=1` (or `--server-only`).
-The same gateway is the policy-enforcing chokepoint when a device is governed by
-[Off Grid Console](#off-grid-for-teams--the-console).
 
-## Off Grid Pro — the sees / remembers / reflects / acts layer
+## Off Grid Pro — coming July 2026
 
 The free app **runs** models. **Pro** adds the always-on layer that turns your own work
 into private, on-device memory — and an assistant that helps you act on it. Everything is
@@ -133,42 +131,12 @@ explicit opt-in, with a visible recording indicator, and nothing leaves the devi
   as authoritative sources, and a skills framework (trigger → action) — on the roadmap
   toward a proactive secretary and a prospective "Ahead" view of your day.
 
-Pro features live in a separate **private** package (a `pro/` submodule); the open core
-never imports it — see [Architecture](#architecture--open-core).
+Pro launches **July 2026** — already paid? You're first in line when it ships. Pro features
+live in a separate **private** package (a `pro/` submodule); the open core never imports it —
+see [Architecture](#architecture--open-core).
 
 → **[Join early access](https://getoffgridai.co/early-access/)** (free) — or
 **[pay now](https://getoffgridai.co/pay)** for lifetime free + first access.
-
-## Off Grid for teams — the Console
-
-Off Grid AI Desktop is also a **node in a fleet**. For organizations that need AI without
-sending data to the cloud, the [**Off Grid Console**](../console) is a self-hostable,
-single-tenant control plane that governs every desktop/mobile node from one place — while
-each node keeps enforcing policy and running inference **locally**.
-
-The split is deliberate: the **node** enforces and emits; the **Console** defines and
-observes. The Console pushes policy / config / SOPs *down* to the fleet and aggregates
-audit / telemetry / distilled learnings *up* — it never runs the intelligence or sees raw
-capture. Each device enrolls (Settings → Fleet Console), pulls its policy bundle, and the
-local gateway becomes the chokepoint that enforces it.
-
-It's **modular and API-first** — a customer buys any subset (just the API, just the Brain
-RAG pipeline, just the agents, or the whole plane). The Console spans five planes:
-
-- **Control** — gateway policy (cloud-egress leash, guardrails, allowed models), conditional
-  model routing (keep PII/regulated traffic on-device), RBAC/ABAC, and an append-only audit log.
-- **Data** — connectors to org DBs/warehouses/SaaS, ingest jobs, PII/masking rules, a data
-  catalog, and retention/erasure (DSAR).
-- **AI (Brain)** — the ingestion→retrieval (RAG) pipeline (parse → chunk → embed → index →
-  retrieve → cite), grounding + evals, a tool/agent registry, and traced agent runs.
-- **FinOps** — virtual keys with budgets, cost attribution by team/project/model, and the
-  "local dividend" (on-device = $0).
-- **Regulatory (DPO)** — live framework coverage (DPDP / EU AI Act / ISO 42001 / GDPR /
-  NIST / HIPAA …), a governance registry, and one-click regulator/DPIA export packs.
-
-The wedge: **truly-local AI that an org can still govern and prove** — answer a regulator
-with live evidence, attribute cost, and guarantee sensitive data never left the device. See
-[`docs/CONSOLE_PLAN.md`](docs/CONSOLE_PLAN.md) and [`docs/ENTERPRISE_BUILD_PLAN.md`](docs/ENTERPRISE_BUILD_PLAN.md).
 
 ## Install
 
@@ -206,10 +174,8 @@ simply absent in this build, so the open app compiles and runs entirely on its o
 
 ## Privacy
 
-All model inference is local. Your conversations, documents, captured activity, and models
-stay on your device — there's no cloud inference, no account, and no API key. You can run it
-fully offline. Even under fleet governance, the Console receives distilled audit and
-learnings, never raw capture.
+All model inference is local. Your conversations, documents, and models stay on your device
+— there's no cloud inference, no account, and no API key. You can run it fully offline.
 
 ## License
 
