@@ -30,6 +30,8 @@ nsis:
   createDesktopShortcut: always
 mac:
   category: public.app-category.productivity
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSMicrophoneUsageDescription: Off Grid AI uses the microphone for on-device voice input. Audio is processed locally and never leaves your device.
@@ -38,7 +40,11 @@ mac:
     - NSDownloadsFolderUsageDescription: Off Grid AI reads files you add to a project so it can answer questions about them — locally, on your device.
   notarize: true
   icon: resources/icon.png
-afterSign: scripts/resign.js
+  # NOTE: no afterSign re-sign hook. electron-builder already signs every nested
+  # binary (resources/bin/*) with hardenedRuntime + these entitlements and then
+  # notarizes + staples. A post-sign re-sign (the old resign.js) re-signed AFTER
+  # notarization → invalidated the staple → "Unnotarized Developer ID". Let
+  # electron-builder's signing stand.
 dmg:
   artifactName: ${name}-${version}.${ext}
 linux:
