@@ -267,6 +267,24 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [canvasWidth, setCanvasWidth] = useState<number | null>(null); // px; null = default 30vw
   const [dragOver, setDragOver] = useState(false);
+  // Safety net so the "Drop files to attach" overlay never gets stuck: a drag that
+  // ends/cancels outside the composer (drop elsewhere, leave the window, Esc)
+  // doesn't fire the composer's own dragleave, so clear it from the window level.
+  useEffect(() => {
+    const clear = (): void => setDragOver(false);
+    const onWinLeave = (e: DragEvent): void => { if (!e.relatedTarget) clear(); };
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') clear(); };
+    window.addEventListener('drop', clear);
+    window.addEventListener('dragend', clear);
+    window.addEventListener('dragleave', onWinLeave);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('drop', clear);
+      window.removeEventListener('dragend', clear);
+      window.removeEventListener('dragleave', onWinLeave);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, []);
   const [viewer, setViewer] = useState<{ title: string; text: string } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
