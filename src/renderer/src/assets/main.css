@@ -1,6 +1,12 @@
 @import './base.css';
 @import "tailwindcss";
 
+/* Tailwind v4 auto-detects content but SKIPS .gitignored paths — and the pro/
+   submodule is gitignored. Without this, any utility class used only in pro
+   screens (e.g. gap-x-16) is never generated → broken spacing in the pro build.
+   Force the scan to include it. (No-op in the open build where pro/ is absent.) */
+@source "../../../../pro/renderer";
+
 @theme {
   --animate-spotlight: spotlight 2s ease .75s 1 forwards;
   --animate-orbit: orbit calc(var(--duration)*1s) linear infinite;
