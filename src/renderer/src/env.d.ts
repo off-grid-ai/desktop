@@ -96,6 +96,12 @@ interface AppSettings {
 }
 
 interface IElectronAPI {
+  // Open-core bridge
+  isPro?: boolean
+  proInvoke?: (channel: string, ...args: unknown[]) => Promise<unknown>
+  proOn?: (channel: string, cb: (...a: unknown[]) => void) => () => void
+  proOff?: (channel: string) => void
+  onMasterMemoryProgress?: (callback: (data: { current: number; total: number }) => void) => (() => void)
   getMemories: (limit: number, appName?: string) => Promise<any[]>
   addMemory: (content: string, source?: string) => Promise<{ id: number }>
   searchMemories: (query: string) => Promise<any[]>
@@ -115,20 +121,39 @@ interface IElectronAPI {
   regenerateMasterMemory: () => Promise<string | null>
 
   // RAG Chat
-  ragChat: (query: string, appName?: string, conversationHistory?: { role: string; content: string }[]) => Promise<{ answer: string; context: any }>
+  ragChat: (query: string, appName?: string, conversationHistory?: { role: string; content: string }[], projectId?: string | null, conversationId?: string, noMemory?: boolean, streamId?: string, thinking?: boolean, images?: string[]) => Promise<{ answer: string; context: any }>
+  onRagStream: (callback: (data: { streamId: string; type: 'content' | 'reasoning' | 'step'; text?: string; step?: any }) => void) => () => void
+  cancelRag: (streamId: string) => void
 
   // RAG Conversations
-  createRagConversation: (id: string, title?: string) => Promise<string>
-  getRagConversations: () => Promise<RagConversation[]>
+  createRagConversation: (id: string, title?: string, projectId?: string | null) => Promise<string>
+  getRagConversations: (projectId?: string | null) => Promise<RagConversation[]>
+  setRagConversationProject: (id: string, projectId: string | null) => Promise<boolean>
   getRagConversation: (id: string) => Promise<RagConversation | null>
   getRagMessages: (conversationId: string) => Promise<RagMessage[]>
   addRagMessage: (conversationId: string, role: 'user' | 'assistant', content: string, context?: any) => Promise<number>
+  truncateRagMessages: (conversationId: string, keepCount: number) => Promise<number>
   updateRagConversationTitle: (id: string, title: string) => Promise<void>
   deleteRagConversation: (id: string) => Promise<void>
 
   // App Settings
   getSettings: () => Promise<AppSettings>
   saveSetting: (key: string, value: any) => Promise<void>
+  consoleEnroll: (
+    url: string,
+    token: string
+  ) => Promise<{ enrolled: boolean; deviceId?: string; error?: string }>
+  consoleStatus: () => Promise<{
+    enrolled: boolean
+    url: string
+    deviceId: string
+    lastSync: number
+    policyVersion: number | null
+    killed: boolean
+    queued: number
+  }>
+  consoleSyncNow: () => Promise<{ enrolled: boolean; policyVersion: number | null; lastSync: number }>
+  consoleDisconnect: () => Promise<boolean>
   reprocessAllSessions: (clean?: boolean) => Promise<{ processed: number; total: number }>
 
   getEntities: (appName?: string) => Promise<any[]>
@@ -138,6 +163,19 @@ interface IElectronAPI {
   deleteEntity: (entityId: number) => Promise<boolean>
   deleteMemory: (memoryId: number) => Promise<boolean>
 
+  // Artifacts library
+  saveArtifact: (a: { kind: 'html' | 'svg' | 'mermaid' | 'react' | 'text' | 'image'; code: string; title?: string; conversationId?: string; projectId?: string | null }) => Promise<{ id: string; kind: 'html' | 'svg' | 'mermaid' | 'react' | 'text' | 'image'; code: string; title: string; created: number }>
+  listArtifacts: (scope?: { conversationId?: string; projectId?: string | null }) => Promise<{ id: string; kind: 'html' | 'svg' | 'mermaid' | 'react' | 'text' | 'image'; code: string; title: string; created: number; conversationId?: string; projectId?: string | null }[]>
+  deleteArtifact: (id: string) => Promise<boolean>
+  processFile: (bytes: ArrayBuffer, name: string) => Promise<{ name: string; kind: 'text' | 'pdf' | 'docx' | 'image' | 'audio' | 'video'; text: string; path?: string }>
+
+  // Skills
+  listSkills: () => Promise<{ name: string; description: string }[]>
+  getSkill: (name: string) => Promise<{ name: string; description: string; instructions: string; trigger?: { kind: 'schedule'; at: string } | { kind: 'keyword'; keywords: string[] } | { kind: 'event'; on: 'calendar' | 'approval' }; action?: string; connectors?: boolean } | null>
+  saveSkill: (input: { name: string; description: string; instructions: string; originalName?: string; trigger?: { kind: 'schedule'; at: string } | { kind: 'keyword'; keywords: string[] } | { kind: 'event'; on: 'calendar' | 'approval' } | null; action?: string; connectors?: boolean }) => Promise<{ name: string; description: string; instructions: string }>
+  deleteSkill: (name: string) => Promise<boolean>
+  skillsDir: () => Promise<string>
+
   // User Profile
   getUserProfile: () => Promise<UserProfile | null>
   saveUserProfile: (profile: UserProfile) => Promise<boolean>
@@ -145,10 +183,8 @@ interface IElectronAPI {
   // Events
   onWatcherData: (callback: (data: any) => void) => () => void
   onPermissionDenied: (callback: () => void) => () => void
-  onNewMessages: (callback: (data: any) => void) => () => void
-  onNewMemory: (callback: (data: any) => void) => () => void
-  onNewEntity: (callback: (data: any) => void) => () => void
-  onSummaryGenerated: (callback: (data: any) => void) => () => void
+  onNewApproval: (callback: (data: { approvalId: number; title: string; detail: string; entityName: string | null }) => void) => () => void
+  onNewAction: (callback: (data: { actionId: number; text: string; due: string | null; entityName: string | null; sourceApp: string }) => void) => () => void
   onReprocessProgress: (callback: (data: ReprocessProgress) => void) => () => void
 
   // Permission APIs
