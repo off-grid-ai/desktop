@@ -28,3 +28,28 @@ Electron 39 + React 19 + Tailwind v4 + electron-vite; better-sqlite3; bundled `l
 - Verify changes with `npx tsc --noEmit` (main: `tsconfig.node.json`, web: `tsconfig.web.json`) before declaring done.
 - Main-process changes need an app restart; renderer changes hot-reload.
 - Don't over-restart — it interrupts capture.
+
+## Testing — test every approved behavior change in the same pass
+
+When iterating (a request, a fix, a tweak the user just confirmed), add a test that captures that specific behavior **as part of the same change** — a regression test that would fail before the change and pass after. This applies to bug fixes (test the exact broken case), new branches/conditions (cover each), and copy/contract changes other code depends on. Do not defer tests to "later" or a separate commit.
+
+- **Unit tests** — vitest, `src/**/*.test.ts` (run `npm test`). Keep logic pure and Electron-free so it's testable: extract decision logic into a no-import module and test that (see `model-sizing.ts`, `search-ranking.ts` + their `__tests__/`). DB/Electron-bound code (anything importing `getDB`, `vision`, etc.) can't be unit-tested directly — pull the pure part out.
+- **Regression guards for prompts/contracts** — when a fix lives in a prompt or string contract, assert it by reading the source (see `extract-prompt.test.ts`, which guards the observation-confabulation fix).
+- **E2E** — Playwright Electron tour in `e2e/` (`npm run test:e2e`), DOM-driven, fresh temp profile, `OFFGRID_PRO=0`. Assert new surfaces render.
+- Before declaring a change done: `npx tsc --noEmit -p tsconfig.node.json && npx tsc --noEmit -p tsconfig.web.json && npm test` — fix failures first.
+
+## Reuse before building — check the inventory FIRST
+
+This is a hard rule, not a preference. **Before writing ANY new component, panel, modal, hook, or service, first search the existing inventory** (`grep -rn` `src/renderer/src/components/`, `ui/`, the relevant screen folder) for something that already does it, and **reuse it**. Do NOT create a new variant of a thing that already exists.
+
+- If something close exists, **extend it with a prop** — never fork a parallel copy. Two surfaces showing the same kind of thing (a viewer, a modal, a card, a search box, a preview pane) MUST use the same component. Parallel versions cause visual + behavioural drift (e.g. don't build a new centered modal when the image **Lightbox** overlay already exists — reuse that layout).
+- Only build new when nothing fits, and say why.
+- UI follows the approved-library + brand-token rules in `docs/DESIGN.md`; icons are `@phosphor-icons/react` only (never lucide).
+
+## Architecture & abstractions (SOLID)
+
+Design to abstractions, not concrete types. When implementations are interchangeable (model backends, TTS/STT engines, image/diffusion runtimes, connectors), the rest of the app depends on one service/interface — never branch on a concrete type in UI/stores (`if (engine === 'kokoro')`, `instanceof X`). Push the decision behind the abstraction; adding an implementation should need zero changes to callers. Normalize capability gaps inside the service, not the UI.
+
+## Copy & content standards
+
+Any change to UI strings, docs, essays, or marketing copy follows the brand voice (`mobile/docs/brand_tone_voice.md`). Easy-to-miss rules: proof-first ("15-30 tok/s", not "fast"); privacy as mechanism ("runs in your Mac's RAM, nothing leaves the device", not "we value privacy"); no em dashes (use " - "), no curly quotes, no exclamation marks; banned words (revolutionary, seamless, empower, leverage, robust, comprehensive, crucial, delve, tapestry, testament, foster, showcase, enhance) and AI-slop phrases ("serves as", "stands as", "it's not X, it's Y") — say it plainly. No emojis in UI.
