@@ -144,17 +144,6 @@ export function getProLicenseInfo(): ProLicenseInfo {
   return toInfo(cache);
 }
 
-/**
- * The license key, used ONLY in-process to seed the device-mesh pairing secret
- * (@offgrid/sync). Two devices on the same license derive the same channel key,
- * so they auto-pair with no passphrase. Returns null when not entitled. The key
- * is never sent on the wire — the pairing handshake transmits only derived
- * proofs (challenge/response), so this stays as safe as the activation itself.
- */
-export function getSyncPairingSecret(): string | null {
-  return isProActive(cache) ? cache.key : null;
-}
-
 /** Returns the cached entitlement immediately and revalidates in the background. */
 export function checkProStatus(): boolean {
   revalidatePro().catch(() => {});

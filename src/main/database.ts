@@ -5,18 +5,8 @@ import { app, safeStorage } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
-import { emitChange } from './sync/bus';
 
 let db: Database.Database | null = null;
-
-// Read a rag_conversation row and emit it as a whole-record op (used after a
-// local write so peers converge on the full record, not a partial patch).
-function emitRagConversation(id: string): void {
-  const row = getDB()
-    .prepare('SELECT id, title, project_id, created_at, updated_at FROM rag_conversations WHERE id = ?')
-    .get(id) as Record<string, unknown> | undefined;
-  if (row) emitChange('rag_conversation', id, 'put', row);
-}
 
 // --- Encryption at rest (new DBs only) -------------------------------------
 // The DB key can't live inside the DB (it gates opening it), so it's stored as a
@@ -253,7 +243,6 @@ export function getDB(): Database.Database {
   db.exec(`
     CREATE TABLE IF NOT EXISTS rag_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uuid TEXT, -- stable, mesh-safe id for cross-device sync (autoincrement id is local-only)
       conversation_id TEXT NOT NULL,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
@@ -1161,7 +1150,6 @@ export function createRagConversation(id: string, title?: string, projectId?: st
         INSERT INTO rag_conversations (id, title, project_id, created_at, updated_at)
         VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `).run(id, title || null, projectId || null);
-    emitRagConversation(id);
     return id;
 }
 
@@ -1195,7 +1183,6 @@ export function getRagConversation(id: string): RagConversation | null {
 export function setRagConversationProject(id: string, projectId: string | null): void {
     const db = getDB();
     db.prepare(`UPDATE rag_conversations SET project_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(projectId, id);
-    emitRagConversation(id);
 }
 
 /**
@@ -1233,16 +1220,14 @@ export function updateRagConversationTitle(id: string, title: string): void {
     const db = getDB();
     db.prepare(`
         UPDATE rag_conversations 
-        SET title = ?, updated_at = CURRENT_TIMESTAMP
+        SET title = ?, updated_at = CURRENT_TIMESTAMP 
         WHERE id = ?
     `).run(title, id);
-    emitRagConversation(id);
 }
 
 export function deleteRagConversation(id: string): boolean {
     const db = getDB();
     const info = db.prepare('DELETE FROM rag_conversations WHERE id = ?').run(id);
-    if (info.changes > 0) emitChange('rag_conversation', id, 'delete');
     return info.changes > 0;
 }
 
@@ -1254,25 +1239,17 @@ export function addRagMessage(
 ): number {
     const db = getDB();
     const contextJson = context ? JSON.stringify(context) : null;
-    const uuid = crypto.randomUUID();
-
+    
     const info = db.prepare(`
-        INSERT INTO rag_messages (uuid, conversation_id, role, content, context, created_at)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    `).run(uuid, conversationId, role, content, contextJson);
-
+        INSERT INTO rag_messages (conversation_id, role, content, context, created_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `).run(conversationId, role, content, contextJson);
+    
     // Update conversation updated_at timestamp
     db.prepare(`
         UPDATE rag_conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?
     `).run(conversationId);
-
-    // Replicate the message (whole-record) + the conversation's bumped timestamp.
-    const row = db
-        .prepare('SELECT uuid, conversation_id, role, content, context, created_at FROM rag_messages WHERE uuid = ?')
-        .get(uuid) as Record<string, unknown> | undefined;
-    if (row) emitChange('rag_message', uuid, 'put', row);
-    emitRagConversation(conversationId);
-
+    
     return Number(info.lastInsertRowid);
 }
 
@@ -1280,14 +1257,11 @@ export function addRagMessage(
 // delete the rest — used by regenerate/edit so old answers don't pile up.
 export function truncateRagMessages(conversationId: string, keepCount: number): number {
     const db = getDB();
-    const rows = db.prepare(`SELECT id, uuid FROM rag_messages WHERE conversation_id = ? ORDER BY id ASC`).all(conversationId) as { id: number; uuid: string | null }[];
-    const cut = rows.slice(Math.max(0, keepCount));
-    const toDelete = cut.map((r) => r.id);
+    const rows = db.prepare(`SELECT id FROM rag_messages WHERE conversation_id = ? ORDER BY id ASC`).all(conversationId) as { id: number }[];
+    const toDelete = rows.slice(Math.max(0, keepCount)).map((r) => r.id);
     if (!toDelete.length) return 0;
     const ph = toDelete.map(() => '?').join(',');
-    const changes = db.prepare(`DELETE FROM rag_messages WHERE id IN (${ph})`).run(...toDelete).changes;
-    for (const r of cut) if (r.uuid) emitChange('rag_message', r.uuid, 'delete');
-    return changes;
+    return db.prepare(`DELETE FROM rag_messages WHERE id IN (${ph})`).run(...toDelete).changes;
 }
 
 export function getRagMessages(conversationId: string): RagMessage[] {

@@ -20,7 +20,6 @@ import { setupLicenseIpc } from './license-ipc'
 import { nativeImage } from 'electron'
 import { purgeLegacyChatImports } from './database'
 import { setupClipboard } from './clipboard'
-import { setupSync } from './sync'
 
 // Pin one canonical userData dir ("Off Grid AI Desktop") regardless of package
 // name, and migrate data from the legacy split dirs ("My Memories" had the
@@ -291,7 +290,6 @@ app.whenReady().then(() => {
      setupMcpIpc(); // basic MCP connectors (management + chat tool extension)
      startModelServer(); // one OpenAI-compatible local gateway on :7878 (LLM + STT)
      setupClipboard(); // local clipboard history + global-hotkey quick-paste popup
-     void setupSync(); // cross-device mesh: mDNS discovery + license-seeded auto-pairing (Pro)
      // Pro features (capture, CRM, meetings, connectors, secretary, proactive,
      // skills engine, console, tray) register their own IPC + intervals + watchers
      // here. No-op in the free build (the pro submodule is absent → stub).

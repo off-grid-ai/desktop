@@ -59,16 +59,6 @@ try {
         return () => ipcRenderer.removeListener('clipboard:popup-opened', sub);
       },
     },
-    // Cross-device mesh status (Phase A: discovery + pairing).
-    sync: {
-      status: () => ipcRenderer.invoke('sync:status'),
-      forget: (deviceId: string) => ipcRenderer.invoke('sync:forget', deviceId),
-      onChanged: (cb: () => void) => {
-        const sub = (): void => cb();
-        ipcRenderer.on('sync:changed', sub);
-        return () => ipcRenderer.removeListener('sync:changed', sub);
-      },
-    },
     getMemories: (limit: number, appName?: string) => ipcRenderer.invoke('db:get-memories', limit, appName),
     addMemory: (content: string, source?: string) => ipcRenderer.invoke('db:add-memory', content, source),
     searchMemories: (query: string) => ipcRenderer.invoke('db:search-memories', query),
