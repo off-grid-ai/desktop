@@ -20,6 +20,11 @@ $ProgressPreference = 'SilentlyContinue'  # makes Invoke-WebRequest downloads fa
 
 $bin = Join-Path $PSScriptRoot '..\resources\bin'
 New-Item -ItemType Directory -Force -Path $bin | Out-Null
+# Canonicalize: collapses the 'scripts\..\' segment to a real absolute path. The
+# uncollapsed form is longer than the copied files' paths, which made the final
+# Substring-based listing throw and (with ErrorActionPreference=Stop) fail the
+# whole script AFTER the binaries had already copied.
+$bin = [System.IO.Path]::GetFullPath($bin)
 $tmpBase = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
 $tmp = Join-Path $tmpBase 'ogbin'
 if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
@@ -103,4 +108,21 @@ try {
 Write-Host ''
 Write-Host 'resources/bin now contains (win64):'
 Get-ChildItem -Path $bin -Recurse -Include *.exe |
-  ForEach-Object { Write-Host "  $($_.FullName.Substring($bin.Length + 1))" }
+  ForEach-Object { Write-Host "  $($_.FullName.Replace($bin, '').TrimStart('\'))" }
+
+# Verify the result so a failed fetch fails LOUD here, not as a confusing
+# "binary not found" at app startup. llama-server is REQUIRED (no chat without
+# it); whisper/sd/ffmpeg are optional (voice/image degrade gracefully if absent).
+$llama = Join-Path $bin 'llama\llama-server.exe'
+if (-not (Test-Path -LiteralPath $llama)) {
+  Write-Error "REQUIRED binary missing: $llama (the llama.cpp fetch failed above). Cannot run the model server."
+  exit 1
+}
+foreach ($p in @(
+    (Join-Path $bin 'whisper\whisper-cli.exe'),
+    (Join-Path $bin 'sd\sd-cli.exe'),
+    (Join-Path $bin 'ffmpeg.exe'))) {
+  if (-not (Test-Path -LiteralPath $p)) { Write-Warning "optional runtime missing (feature will be unavailable): $p" }
+}
+Write-Host ''
+Write-Host "OK: llama-server.exe present at $llama"
