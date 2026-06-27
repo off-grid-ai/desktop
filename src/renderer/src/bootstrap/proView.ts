@@ -14,6 +14,11 @@ export interface ProViewContext {
   actionsMode: 'todo' | 'approvals' | null;
   setActionsMode: (m: 'todo' | 'approvals' | null) => void;
   searchQuery: string;
+  onSearchQueryChange: (q: string) => void;
+  searchSources: string[];
+  onSearchSourcesChange: (s: string[]) => void;
+  searchSort: 'relevance' | 'recency' | 'match';
+  onSearchSortChange: (s: 'relevance' | 'recency' | 'match') => void;
   selectedMemoryId: number | null;
   setSelectedMemoryId: (id: number | null) => void;
   // The meeting-recorder handle (typed loosely so core needn't know its shape).

@@ -40,6 +40,8 @@ try {
       list: (limit?: number) => ipcRenderer.invoke('clipboard:list', limit),
       search: (query: string) => ipcRenderer.invoke('clipboard:search', query),
       getImage: (id: string) => ipcRenderer.invoke('clipboard:get-image', id),
+      fileText: (id: string) => ipcRenderer.invoke('clipboard:file-text', id),
+      fileDataUrl: (id: string) => ipcRenderer.invoke('clipboard:file-data-url', id),
       restore: (id: string) => ipcRenderer.invoke('clipboard:restore', id),
       paste: (id: string) => ipcRenderer.invoke('clipboard:paste', id),
       remove: (id: string) => ipcRenderer.invoke('clipboard:delete', id),
@@ -93,6 +95,7 @@ try {
     // RAG Conversation History
     createRagConversation: (id: string, title?: string, projectId?: string | null) => ipcRenderer.invoke('rag:create-conversation', id, title, projectId),
     getRagConversations: (projectId?: string | null) => ipcRenderer.invoke('rag:get-conversations', projectId),
+    searchRagConversationIds: (query: string) => ipcRenderer.invoke('rag:search-conversation-ids', query),
     setRagConversationProject: (id: string, projectId: string | null) => ipcRenderer.invoke('rag:set-conversation-project', id, projectId),
     getRagConversation: (id: string) => ipcRenderer.invoke('rag:get-conversation', id),
     getRagMessages: (conversationId: string) => ipcRenderer.invoke('rag:get-messages', conversationId),
@@ -202,6 +205,10 @@ try {
 
     // Setup + system health
     systemHealth: () => ipcRenderer.invoke('system:health'),
+    setupRecommendation: (mode?: string) => ipcRenderer.invoke('setup:recommendation', mode),
+    setupPlan: (mode?: string) => ipcRenderer.invoke('setup:plan', mode),
+    chatVisionAvailable: () => ipcRenderer.invoke('model:chat-vision'),
+    writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
     autoConfigure: () => ipcRenderer.invoke('setup:auto-configure'),
     restartComponent: (id: string) => ipcRenderer.invoke('system:restart', id),
     estimateModelFit: (modelId: string) => ipcRenderer.invoke('system:estimate-fit', modelId),
@@ -211,6 +218,8 @@ try {
     deleteOrphans: () => ipcRenderer.invoke('models:delete-orphans'),
     listDownloads: () => ipcRenderer.invoke('models:downloads'),
     retryDownload: (modelId: string) => ipcRenderer.invoke('models:retry-download', modelId),
+    clearDownload: (modelId: string) => ipcRenderer.invoke('models:clear-download', modelId),
+    clearDownloads: () => ipcRenderer.invoke('models:clear-downloads'),
     importLocalModel: () => ipcRenderer.invoke('models:import'),
 
     // Data & privacy
@@ -226,7 +235,7 @@ try {
     // --- Agentic tool-calling (built-in tools) ---
     listTools: () => ipcRenderer.invoke('tools:list'),
     setToolEnabled: (name: string, enabled: boolean) => ipcRenderer.invoke('tools:set-enabled', name, enabled),
-    toolChat: (query: string, history?: { role: string; content: string }[], opts?: { connectors?: boolean }) => ipcRenderer.invoke('tools:chat', query, history, opts),
+    toolChat: (query: string, history?: { role: string; content: string }[], opts?: { connectors?: boolean; conversationId?: string }) => ipcRenderer.invoke('tools:chat', query, history, opts),
 
     // --- LLM inference settings ---
     getLlmSettings: () => ipcRenderer.invoke('llm:get-settings'),
@@ -240,6 +249,7 @@ try {
 
     // --- File attachments → text ---
     processFile: (bytes: ArrayBuffer, name: string) => ipcRenderer.invoke('files:process', bytes, name),
+    fileDataUrl: (path: string) => ipcRenderer.invoke('files:data-url', path),
 
     // --- Skills ---
     listSkills: () => ipcRenderer.invoke('skills:list'),
@@ -324,7 +334,8 @@ try {
       ipcRenderer.invoke('crm:entity-record', entityId, opts),
     crmObservationFrames: (observationId: number) => ipcRenderer.invoke('crm:observation-frames', observationId),
     crmSearch: (query: string, entityId?: number) => ipcRenderer.invoke('crm:search', query, entityId),
-    universalSearch: (query: string, opts?: { limit?: number; semantic?: boolean; sources?: string[] }) =>
+    searchFacets: (query: string) => ipcRenderer.invoke('search:facets', query),
+    universalSearch: (query: string, opts?: { limit?: number; semantic?: boolean; sources?: string[]; sort?: 'relevance' | 'recency' | 'match' }) =>
       ipcRenderer.invoke('search:universal', query, opts),
     searchStatus: () => ipcRenderer.invoke('search:status'),
     searchSources: () => ipcRenderer.invoke('search:sources'),

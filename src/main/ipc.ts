@@ -1,5 +1,5 @@
-import { ipcMain, BrowserWindow, app } from 'electron';
-import { getDB, getChatSessions, upsertChatSummary, getMemoriesForSession, getMemoryRecordsForSession, getMasterMemory, updateMasterMemory, getAllChatSummaries, upsertEntity, addEntityFact, updateEntitySummary, getEntities, getEntityDetails, upsertEntitySession, rebuildEntityEdgesForSession, getEntityGraph, rebuildEntityEdgesForAllSessions, deleteEntity, deleteMemory, getEntitiesForSession, getDashboardStats, getUserProfile, saveUserProfile, UserProfile, createRagConversation, getRagConversations, getRagConversation, deleteRagConversation, addRagMessage, getRagMessages, updateRagConversationTitle, getSettings, saveSetting, getSetting } from './database';
+import { ipcMain, BrowserWindow, app, clipboard } from 'electron';
+import { getDB, getChatSessions, upsertChatSummary, getMemoriesForSession, getMemoryRecordsForSession, getMasterMemory, updateMasterMemory, getAllChatSummaries, upsertEntity, addEntityFact, updateEntitySummary, getEntities, getEntityDetails, upsertEntitySession, rebuildEntityEdgesForSession, getEntityGraph, rebuildEntityEdgesForAllSessions, deleteEntity, deleteMemory, getEntitiesForSession, getDashboardStats, getUserProfile, saveUserProfile, UserProfile, createRagConversation, getRagConversations, getRagConversation, deleteRagConversation, addRagMessage, getRagMessages, updateRagConversationTitle, searchRagConversationIds, getSettings, saveSetting, getSetting } from './database';
 import { embeddings } from './embeddings';
 import { getPermissionStatus, requestAccessibilityPermission, requestScreenRecordingPermission, openAccessibilitySettings, openScreenRecordingSettings } from './permissions';
 import { getPrompt, getAllPromptDefs, resetPrompt, getPromptTemplate } from './prompts';
@@ -1060,6 +1060,8 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       return getRagConversations(projectId);
   });
 
+  ipcMain.handle('rag:search-conversation-ids', (_, query: string) => searchRagConversationIds(query));
+
   ipcMain.handle('rag:set-conversation-project', async (_, id: string, projectId: string | null) => {
       const { setRagConversationProject } = await import('./database');
       setRagConversationProject(id, projectId);
@@ -1378,6 +1380,10 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       return retryDownload(modelId, (p) =>
           BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('model:download-progress', p)));
   });
+  ipcMain.handle('models:clear-download', (_, modelId: string) =>
+      import('./models-manager').then((m) => m.clearDownload(modelId)));
+  ipcMain.handle('models:clear-downloads', () =>
+      import('./models-manager').then((m) => m.clearInactiveDownloads()));
   // Import a local .gguf from disk (file picker → validate → copy → register).
   ipcMain.handle('models:import', async () => {
       const { dialog } = await import('electron');
@@ -1396,6 +1402,17 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
   // One aggregated snapshot of every local component (chat LLM, gateway, vision,
   // embeddings, STT, TTS, image gen) for the Settings → Health panel.
   ipcMain.handle('system:health', () => import('./setup').then((m) => m.getSystemHealth()));
+  // Preview what "Configure for me" would pick for a mode (no side effects).
+  ipcMain.handle('setup:recommendation', (_e, mode?: string) =>
+      import('./setup').then((m) => m.getRecommendation(mode as 'conservative' | 'balanced' | 'extreme' | undefined)));
+  // Full setup plan (chat + STT + TTS + image) for a mode, so the UI can list every
+  // model "Configure for me" will download before the user commits.
+  ipcMain.handle('setup:plan', (_e, mode?: string) =>
+      import('./setup').then((m) => m.getSetupPlan(mode as 'conservative' | 'balanced' | 'extreme' | undefined)));
+  // Whether the active chat model can read images (gate image attachments on this).
+  ipcMain.handle('model:chat-vision', () => import('./llm').then((m) => m.llm.hasVision()));
+  // Reliable text→clipboard (the renderer's navigator.clipboard is flaky in Electron).
+  ipcMain.handle('clipboard:write-text', (_e, text: string) => { try { clipboard.writeText(String(text ?? '')); return true; } catch { return false; } });
   // "Configure for me": pick a RAM-appropriate model, download, activate, start,
   // verify. Streams progress back to all windows via 'setup:progress'.
   ipcMain.handle('setup:auto-configure', async () => {
@@ -1532,7 +1549,7 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       const { setToolEnabled } = await import('./tools');
       setToolEnabled(name, enabled);
   });
-  ipcMain.handle('tools:chat', async (_e, query: string, history?: { role: string; content: string }[], opts?: { connectors?: boolean }) => {
+  ipcMain.handle('tools:chat', async (_e, query: string, history?: { role: string; content: string }[], opts?: { connectors?: boolean; conversationId?: string }) => {
       const { toolChat } = await import('./tools');
       return toolChat(query, history || [], opts || {});
   });
@@ -1570,6 +1587,17 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
   ipcMain.handle('files:process', async (_e, bytes: ArrayBuffer | Uint8Array, name: string) => {
       const { processUpload } = await import('./files');
       return processUpload(name, bytes);
+  });
+  // An on-disk uploaded file as a data URL, so the chat viewer can render a PDF
+  // natively (Chromium's built-in viewer) instead of dumping parsed text.
+  ipcMain.handle('files:data-url', async (_e, p: string) => {
+      try {
+          const fs = await import('fs');
+          const buf = await fs.promises.readFile(p);
+          const ext = (p.split('.').pop() || '').toLowerCase();
+          const mime = ext === 'pdf' ? 'application/pdf' : ext === 'png' ? 'image/png' : /^jpe?g$/.test(ext) ? 'image/jpeg' : 'application/octet-stream';
+          return `data:${mime};base64,${buf.toString('base64')}`;
+      } catch { return null; }
   });
 
   // --- Skills (.skills folder, invoked from chat with /skill-name) ---
