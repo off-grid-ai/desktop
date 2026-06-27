@@ -362,7 +362,8 @@ var CATALOG = [
       {
         name: "kokoro-82m-v1.0.onnx",
         url: resolve("onnx-community/Kokoro-82M-v1.0-ONNX", "onnx/model_quantized.onnx"),
-        role: "primary"
+        role: "primary",
+        sizeBytes: 92361116
       }
     ]
   },
@@ -466,7 +467,8 @@ var ModelDownloader = class {
     return this.store.isInstalled(modelId);
   }
   cancel(modelId) {
-    this.aborts.get(modelId)?.abort();
+    var _a;
+    (_a = this.aborts.get(modelId)) == null ? void 0 : _a.abort();
   }
   emit(p) {
     for (const l of this.listeners) l(p);
@@ -782,8 +784,8 @@ async function getModelFiles(repoId, opts = {}) {
     return {
       fileName: baseName(f.rfilename),
       quant,
-      quality: info?.quality ?? "Unknown",
-      recommended: info?.recommended ?? false,
+      quality: (info == null ? void 0 : info.quality) ?? "Unknown",
+      recommended: (info == null ? void 0 : info.recommended) ?? false,
       sizeBytes: f.size ?? 0,
       downloadUrl: url(f.rfilename),
       mmproj: matchMmproj(f.rfilename)
@@ -869,17 +871,18 @@ function openAICompatibleProvider(cfg) {
       return (data.data ?? []).map((m) => ({ id: m.id, name: m.id }));
     },
     async *chat(messages, opts) {
+      var _a, _b, _c;
       const res = await f(`${cfg.endpoint}/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders(cfg.apiKey) },
         body: JSON.stringify({
-          model: opts?.model,
+          model: opts == null ? void 0 : opts.model,
           messages,
           stream: true,
-          temperature: opts?.temperature,
-          max_tokens: opts?.maxTokens
+          temperature: opts == null ? void 0 : opts.temperature,
+          max_tokens: opts == null ? void 0 : opts.maxTokens
         }),
-        signal: opts?.signal
+        signal: opts == null ? void 0 : opts.signal
       });
       if (!res.ok || !res.body) throw new Error(`chat failed: HTTP ${res.status}`);
       for await (const line of lines(res.body)) {
@@ -889,7 +892,7 @@ function openAICompatibleProvider(cfg) {
         if (data === "[DONE]") return;
         try {
           const j = JSON.parse(data);
-          const c = j.choices?.[0]?.delta?.content;
+          const c = (_c = (_b = (_a = j.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.delta) == null ? void 0 : _c.content;
           if (c) yield c;
         } catch {
         }
@@ -909,11 +912,12 @@ function ollamaProvider(cfg) {
       return (data.models ?? []).map((m) => ({ id: m.name, name: m.name }));
     },
     async *chat(messages, opts) {
+      var _a;
       const res = await f(`${cfg.endpoint}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: opts?.model, messages, stream: true }),
-        signal: opts?.signal
+        body: JSON.stringify({ model: opts == null ? void 0 : opts.model, messages, stream: true }),
+        signal: opts == null ? void 0 : opts.signal
       });
       if (!res.ok || !res.body) throw new Error(`chat failed: HTTP ${res.status}`);
       for await (const line of lines(res.body)) {
@@ -921,7 +925,7 @@ function ollamaProvider(cfg) {
         if (!t) continue;
         try {
           const j = JSON.parse(t);
-          if (j.message?.content) yield j.message.content;
+          if ((_a = j.message) == null ? void 0 : _a.content) yield j.message.content;
           if (j.done) return;
         } catch {
         }

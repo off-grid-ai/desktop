@@ -132,52 +132,6 @@ function SecretaryPrefs(): React.ReactElement {
 }
 
 
-type PerfMode = 'conservative' | 'balanced' | 'extreme';
-const PERF_MODES: { id: PerfMode; label: string; desc: string }[] = [
-  { id: 'conservative', label: 'Conservative', desc: 'Lightest footprint — small context, quantized cache. Best on busy or smaller Macs.' },
-  { id: 'balanced', label: 'Balanced', desc: 'Sensible default — good context within a safe share of your RAM.' },
-  { id: 'extreme', label: 'Extreme', desc: 'Maximum capability — largest context your RAM allows. Heaviest on memory.' },
-];
-
-// Resource-usage preset: decides how much of the machine the local AI uses.
-// Writes performanceMode; the backend applies the preset + reloads the model.
-function ResourceModeSection(): React.ReactElement {
-  const [mode, setMode] = useState<PerfMode>('balanced');
-  useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window.api as any).getLlmSettings?.().then((s: { performanceMode?: PerfMode }) => { if (s?.performanceMode) setMode(s.performanceMode); }).catch(() => {});
-  }, []);
-  const pick = (m: PerfMode): void => {
-    setMode(m);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window.api as any).setLlmSettings?.({ performanceMode: m });
-  };
-  return (
-    <motion.div
-      className="rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 p-6"
-      initial={{ opacity: 0, filter: 'blur(10px)' }}
-      animate={{ opacity: 1, filter: 'blur(0px)' }}
-      transition={{ duration: 0.6, delay: 0.14 }}
-    >
-      <h3 className="text-white font-medium text-base mb-1">Resource usage</h3>
-      <p className="text-neutral-500 text-sm mb-4">How much of your Mac the local AI may use. Higher modes allow longer context and bigger models; a safety cap always prevents memory overcommit.</p>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        {PERF_MODES.map((m) => (
-          <button
-            key={m.id}
-            onClick={() => pick(m.id)}
-            aria-pressed={mode === m.id}
-            className={`rounded-md border p-3 text-left transition-colors ${mode === m.id ? 'border-green-500 bg-green-500/5' : 'border-neutral-800 hover:border-neutral-700'}`}
-          >
-            <div className={`text-sm ${mode === m.id ? 'text-green-500' : 'text-neutral-200'}`}>{m.label}</div>
-            <div className="mt-1 text-[11px] leading-snug text-neutral-500">{m.desc}</div>
-          </button>
-        ))}
-      </div>
-    </motion.div>
-  );
-}
-
 export function Settings() {
   // Pro/core aware: the proactive / secretary / fleet-console sections are Pro
   // and are hidden in the free build.
@@ -210,32 +164,29 @@ export function Settings() {
   };
 
   return (
-    <div className="relative h-full">
-      <div className="absolute inset-0 overflow-y-auto pb-16">
+    <div className="relative flex h-full flex-col">
+      {/* Fixed header — stays put while the content below scrolls. */}
+      <div className="flex shrink-0 items-center gap-3 border-b border-neutral-800/60 px-1 pb-4">
+        <div className="h-10 w-10 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center">
+          <svg className="w-5 h-5 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </div>
+        <div>
+          <h2 className="text-lg font-semibold text-white">Settings</h2>
+          <p className="text-sm text-neutral-500">{isPro ? 'Who you are, what Off Grid has learned, and your devices' : 'Personalization & automation unlock with Pro'}</p>
+        </div>
+      </div>
+
+      {/* Scrolling content below the fixed header */}
+      <div className="relative flex-1 overflow-y-auto px-1 pt-5 pb-16">
         <motion.div
-          className="flex flex-col gap-6 px-1"
+          className="flex flex-col gap-6"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
         >
-          {/* Header */}
-          <motion.div
-            className="flex items-center gap-3"
-            initial={{ opacity: 0, filter: 'blur(10px)' }}
-            animate={{ opacity: 1, filter: 'blur(0px)' }}
-            transition={{ duration: 0.6, delay: 0.1 }}
-          >
-            <div className="h-10 w-10 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center">
-              <svg className="w-5 h-5 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-white">Settings</h2>
-              <p className="text-sm text-neutral-500">{isPro ? 'Who you are, what Off Grid has learned, and your devices' : 'Personalization & automation unlock with Pro'}</p>
-            </div>
-          </motion.div>
 
           {/* Setup & health — available in every build. Re-run setup or check
               what's running at any time. */}
@@ -255,9 +206,6 @@ export function Settings() {
               <StoragePanel />
             </div>
           </motion.div>
-
-          {/* Resource usage — Conservative / Balanced / Extreme */}
-          <ResourceModeSection />
 
           {/* Identity — who you are (Pro: foundation for the act pillar) */}
           {isPro ? (

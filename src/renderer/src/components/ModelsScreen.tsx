@@ -13,6 +13,7 @@ import {
   IconExternalLink,
   IconEye,
 } from '@tabler/icons-react';
+import { StoragePanel } from './setup/StoragePanel';
 import {
   filterAndSort,
   parseParamCount,
@@ -714,6 +715,13 @@ export function ModelsScreen() {
       </div>
         </>
       )}
+
+      {/* Storage & download manager: disk usage, in-flight downloads (incl. ones
+          started by "Configure for me") with cancel/retry/dismiss, and cleanup. */}
+      <div className="mt-10">
+        <h2 className="mb-3 text-[11px] font-medium uppercase tracking-widest text-neutral-500">Storage &amp; downloads</h2>
+        <StoragePanel />
+      </div>
 
       {/* Model detail — slide-over with full info + Hugging Face link (master-detail). */}
       {detail && (() => {

@@ -252,9 +252,20 @@ export function getActiveModel(): string | null {
   }
 }
 
-export function setActiveModalChoice(kind: string, modelId: string | null): { success: boolean; error?: string } {
+export async function setActiveModalChoice(kind: string, modelId: string | null): Promise<{ success: boolean; error?: string }> {
   if (kind === 'image' || kind === 'speech' || kind === 'transcription') {
-    setModal(kind, modelId);
+    let stored = modelId;
+    // The image resolver loads by FILENAME, but the UI passes a catalog id — map it
+    // to the entry's primary filename so an in-app pick (e.g. Juggernaut) takes effect.
+    if (modelId && kind === 'image') {
+      try {
+        const { CATALOG } = await import('@offgrid/models');
+        const e = CATALOG.find((m) => m.id === modelId);
+        const fname = (e?.files?.find((f) => f.role === 'primary') ?? e?.files?.[0])?.name;
+        if (fname) stored = fname;
+      } catch { /* keep modelId as-is */ }
+    }
+    setModal(kind as Modality, stored);
     return { success: true };
   }
   return { success: false, error: 'use setActiveModel for the chat LLM (text/vision)' };
@@ -455,4 +466,36 @@ export function listDownloads(): DownloadProgress[] {
 /** Retry (resumes from the partial .part) a failed/interrupted download. */
 export async function retryDownload(modelId: string, onProgress?: ProgressCb): Promise<{ success: boolean; error?: string }> {
   return downloadModel(modelId, onProgress);
+}
+
+/** Dismiss a download-manager entry: abort it if still running, delete its partial
+ *  .part files, and drop it from the registry so it leaves the Downloads list. */
+export async function clearDownload(modelId: string): Promise<{ success: boolean; freedBytes: number }> {
+  cancelDownload(modelId); // no-op if not currently downloading
+  let freedBytes = 0;
+  try {
+    const dir = llm.getModelsDir();
+    const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models');
+    const entry = CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId).catch(() => null));
+    for (const f of entry?.files ?? []) {
+      const part = path.join(dir, `${f.name}.part`);
+      try { freedBytes += fs.statSync(part).size; } catch { /* none */ }
+      try { fs.rmSync(part, { force: true }); } catch { /* ignore */ }
+    }
+  } catch { /* best effort */ }
+  ensureRegistryLoaded();
+  lastProgress.delete(modelId);
+  persistRegistry();
+  return { success: true, freedBytes };
+}
+
+/** Clear every failed/cancelled/interrupted download (entry + .part). */
+export async function clearInactiveDownloads(): Promise<{ success: boolean; count: number; freedBytes: number }> {
+  ensureRegistryLoaded();
+  const ids = Array.from(lastProgress.values())
+    .filter((p) => p.status === 'failed' || p.status === 'cancelled')
+    .map((p) => p.modelId);
+  let freedBytes = 0;
+  for (const id of ids) { const r = await clearDownload(id); freedBytes += r.freedBytes; }
+  return { success: true, count: ids.length, freedBytes };
 }

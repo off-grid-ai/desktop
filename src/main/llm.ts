@@ -6,18 +6,22 @@ import path from "path";
 import * as fs from "fs";
 import * as http from "http";
 import { modelsDir as getModelsDir, binRoots, isPackaged, onHostQuit } from "./runtime-env";
+import { computeSafeCtx, modeBudget, type KvCacheType, type PerformanceMode } from "./model-sizing";
 
-export type KvCacheType = "f16" | "q8_0" | "q4_0";
-export type PerformanceMode = "conservative" | "balanced" | "extreme";
+export type { KvCacheType, PerformanceMode };
 
 // Friendly presets that decide how much of the machine the local model uses.
 // Conservative leaves lots of headroom (safest on small / busy machines);
 // Extreme pushes context/memory for max capability. The RAM clamp still applies
 // on top, so even Extreme can't overcommit into a freeze.
+// Context is a CEILING, not a fill-the-RAM target: a big context means a big KV
+// cache (the bulk of llama-server's memory), so defaults stay modest. Conservative
+// also quantizes the KV cache (q8_0) to roughly halve it. Users who want more can
+// raise context or pick Extreme.
 const MODE_PRESETS: Record<PerformanceMode, { ctxSize: number; kvCacheType: KvCacheType; flashAttn: boolean }> = {
   conservative: { ctxSize: 8192, kvCacheType: "q8_0", flashAttn: true },
-  balanced: { ctxSize: 32768, kvCacheType: "f16", flashAttn: false },
-  extreme: { ctxSize: 131072, kvCacheType: "f16", flashAttn: false },
+  balanced: { ctxSize: 16384, kvCacheType: "f16", flashAttn: false },
+  extreme: { ctxSize: 65536, kvCacheType: "f16", flashAttn: false },
 };
 
 export interface LlmSettings {
@@ -61,7 +65,7 @@ export class LLMService {
   // User-tunable inference settings (persisted). Context window needs a server
   // respawn to take effect (it's a launch arg); temperature is per-request.
   private temperature = 0.7;
-  private ctxSize = 65536; // 64k — gemma-4 trains to 131k, so this is safe headroom and stops "context exceeded"
+  private ctxSize = 16384; // modest default — context is a ceiling, not a fill-RAM target (KV cache is the bulk of memory). Raise it or use Extreme for more.
   // ONE local gemma server, but many callers (capture distill, day-plan, the
   // secretary, action extraction…). Concurrent requests contend and time out.
   // Serialize them so each gets the server to itself; the per-call timeout sits
@@ -86,7 +90,10 @@ export class LLMService {
   // Crash recovery: distinguish an intentional kill (stop/reload/settings respawn)
   // from an unexpected crash so we only auto-restart on real crashes.
   private intentionalStop = false;
-  private crashCount = 0;
+  // Timestamps of recent auto-restarts. A rolling 2-minute window caps recovery so
+  // a server that keeps dying (e.g. memory pressure on a too-large model) can NOT
+  // thrash-respawn a multi-GB process forever.
+  private restartTimes: number[] = [];
   private get settingsFile(): string { return path.join(getModelsDir(), "llm-settings.json"); }
 
   constructor() {
@@ -110,15 +117,6 @@ export class LLMService {
     } catch { /* defaults */ }
   }
 
-  // RAM budget the context clamp targets, by resource-usage mode. Conservative
-  // leaves more free; Extreme uses most of RAM. The clamp + GGUF math still apply.
-  private modeBudget(): { frac: number; reserveGb: number } {
-    switch (this.performanceMode) {
-      case "conservative": return { frac: 0.45, reserveGb: 2.0 };
-      case "extreme": return { frac: 0.82, reserveGb: 1.0 };
-      default: return { frac: 0.65, reserveGb: 1.5 };
-    }
-  }
 
   // Clamp the requested context window to what THIS machine + THIS model can hold
   // without overcommitting unified memory. A big -c allocates a KV cache up front
@@ -133,17 +131,8 @@ export class LLMService {
       let weightsGb = 0;
       try { weightsGb += fs.statSync(this.modelPath).size / 1e9; } catch { /* unknown */ }
       try { if (this.mmProjPath) weightsGb += fs.statSync(this.mmProjPath).size / 1e9; } catch { /* unknown */ }
-      // Keep total resident under the mode's RAM fraction; reserve headroom for
-      // OS/app/compute. Conservative ≈ 45%, Balanced ≈ 65%, Extreme ≈ 82%.
-      const { frac, reserveGb } = this.modeBudget();
-      const kvBudgetGb = Math.max(0.5, totalGb * frac - weightsGb - reserveGb);
-      // Conservative KV-cache cost per 1k tokens (~8B-class). f16 is the baseline;
-      // quantized KV roughly halves (q8_0) or quarters (q4_0) the footprint, so a
-      // larger context fits safely. Overestimating is the safe direction.
-      const perKTokGb = this.kvCacheType === "q4_0" ? 0.05 : this.kvCacheType === "q8_0" ? 0.085 : 0.16;
-      const ctxCap = Math.floor((kvBudgetGb / perKTokGb) * 1000);
-      const safe = Math.max(2048, Math.min(requested, ctxCap));
-      const rounded = Math.floor(safe / 1024) * 1024;
+      const { frac, reserveGb } = modeBudget(this.performanceMode);
+      const rounded = computeSafeCtx({ requested, totalGb, weightsGb, kvType: this.kvCacheType, frac, reserveGb });
       if (rounded < requested) {
         console.warn(`[LLMService] Clamping context ${requested} -> ${rounded} (RAM ${totalGb.toFixed(0)}GB, weights ${weightsGb.toFixed(1)}GB) to avoid memory overcommit`);
       }
@@ -252,13 +241,19 @@ export class LLMService {
       this.server = null;
     }
     this.initialized = false;
-    this.crashCount = 0; // new model — start its crash budget fresh
+    this.restartTimes = []; // new model — start its crash budget fresh
     this.resolveModel();
   }
 
   // A model is "ready" once its PRIMARY weights are present. mmproj is optional —
   // it only adds image input; a vision model still runs text without it. (Gating
   // on mmproj wrongly kept "Setup Required" up for an activated vision model.)
+  /** Whether the active chat model can read images (has a vision projector / mmproj). */
+  hasVision(): boolean {
+    this.resolveModel();
+    return !!this.mmProjPath && fs.existsSync(this.mmProjPath);
+  }
+
   modelsExist(): boolean {
     this.resolveModel();
     return fs.existsSync(this.modelPath);
@@ -404,21 +399,24 @@ export class LLMService {
       console.log(`[llama-server] ${data}`);
     });
 
-    this.server.on("close", (code) => {
-        console.log(`[llama-server] exited with code ${code}`);
+    this.server.on("close", (code, signal) => {
+        console.log(`[llama-server] exited with code ${code} signal ${signal}`);
         const wasIntentional = this.intentionalStop;
         this.intentionalStop = false;
         this.server = null;
         this.initialized = false;
-        // Unexpected exit while we expected it running = a crash. Auto-recover.
-        if (!wasIntentional && !this.paused) this.handleCrash(code ?? -1);
+        // Do NOT auto-restart a DELIBERATE kill — a user/OS `kill` (SIGKILL/SIGTERM)
+        // or our own teardown. Otherwise killing llama-server just respawns it,
+        // making it impossible to stop without killing the whole app. Only recover
+        // from a genuine crash (non-zero code / SIGABRT) we didn't initiate.
+        const deliberate = signal === 'SIGKILL' || signal === 'SIGTERM';
+        if (!wasIntentional && !this.paused && !deliberate) this.handleCrash(code ?? -1);
     });
 
     try {
         await this.waitForReady();
         console.log("[LLMService] Vision server ready!");
         this.initialized = true;
-        this.crashCount = 0; // a clean start resets the crash escalation
     } catch (e) {
         console.error("[LLMService] Failed to start server:", e);
         this.stop();
@@ -429,13 +427,19 @@ export class LLMService {
    *  crashes shrinks the context (the usual culprit is memory pressure) before
    *  retrying. Gives up after a few attempts so we never spin forever. */
   private async handleCrash(code: number): Promise<void> {
-    this.crashCount++;
-    if (this.crashCount > 3) {
-      console.error(`[LLMService] llama-server crashed ${this.crashCount}x (last code ${code}); giving up auto-restart`);
+    // Rolling 2-minute window: if it has already died 3× recently, STOP recovering.
+    // Prevents thrash-respawning a multi-GB process when the model is too heavy for
+    // the machine (memory-pressure kills). Surface it; the user can pick a smaller
+    // model / Conservative mode or hit Health → Restart.
+    const now = Date.now();
+    this.restartTimes = this.restartTimes.filter((t) => now - t < 120_000);
+    if (this.restartTimes.length >= 3) {
+      console.error(`[LLMService] llama-server died ${this.restartTimes.length + 1}× in 2min (last code ${code}); NOT auto-restarting — likely memory pressure. Pick a smaller model or Conservative mode.`);
       return;
     }
-    // On the 2nd+ crash, halve the context — most repeat crashes are OOM/overcommit.
-    if (this.crashCount >= 2) {
+    this.restartTimes.push(now);
+    // On a repeat death in the window, halve the context — usually OOM/overcommit.
+    if (this.restartTimes.length >= 2) {
       const reduced = Math.max(2048, Math.floor((this.ctxSize / 2) / 1024) * 1024);
       if (reduced < this.ctxSize) {
         console.warn(`[LLMService] reducing context ${this.ctxSize} -> ${reduced} after repeated crashes`);
@@ -443,9 +447,9 @@ export class LLMService {
         try { fs.writeFileSync(this.settingsFile, JSON.stringify(this.getSettings())); } catch { /* ignore */ }
       }
     }
-    await new Promise((r) => setTimeout(r, 1000 * this.crashCount));
+    await new Promise((r) => setTimeout(r, 1000 * this.restartTimes.length));
     if (this.paused || this.intentionalStop) return;
-    console.log(`[LLMService] auto-restarting llama-server (attempt ${this.crashCount})`);
+    console.log(`[LLMService] auto-restarting llama-server (attempt ${this.restartTimes.length})`);
     this.init().catch(() => {});
   }
 

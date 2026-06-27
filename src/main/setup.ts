@@ -9,7 +9,7 @@
 import os from 'os';
 import * as http from 'http';
 import { llm } from './llm';
-import { getActiveModel, downloadModel, listInstalled, setActiveModel } from './models-manager';
+import { getActiveModel, downloadModel, listInstalled, setActiveModel, setActiveModalChoice } from './models-manager';
 
 export type ComponentStatus = 'ready' | 'starting' | 'down' | 'not_installed';
 
@@ -119,37 +119,29 @@ export async function getSystemHealth(): Promise<SystemHealth> {
 /** Choose the best chat/vision model that fits this machine's RAM. Prefers a
  *  vision model (so chat supports images) at the largest size the RAM tier
  *  allows; falls back to text, then to a safe small default. */
-export async function recommendChatModel(): Promise<{ id: string; name: string } | null> {
+export type RecMode = 'conservative' | 'balanced' | 'extreme';
+
+export async function recommendChatModel(modeOverride?: RecMode): Promise<{ id: string; name: string } | null> {
   const { CATALOG, recommendForRam } = await import('@offgrid/models');
+  const { chooseChatModel, recommendedParamCeiling, preferredModelIds, totalBytes } = await import('./model-sizing');
   const gb = ramGb();
   const tier = recommendForRam(gb);
-  const totalBytes = (m: { files: { sizeBytes?: number }[] }): number =>
-    m.files.reduce((s, f) => s + (f.sizeBytes ?? 0), 0);
-  // Weights must fit COMFORTABLY in RAM, scaled by the resource-usage mode:
-  // Conservative ≈ 30%, Balanced ≈ 38%, Extreme ≈ 55% of total RAM. (A model that
-  // merely "fits" by params can still freeze the machine once its KV cache is
-  // allocated — that's what happened with an 8B model at 64k on a 16GB Mac.)
-  let frac = 0.38;
-  try {
-    const mode = (llm.getSettings() as { performanceMode?: string }).performanceMode;
-    frac = mode === 'conservative' ? 0.30 : mode === 'extreme' ? 0.55 : 0.38;
+  let mode: RecMode = 'balanced';
+  if (modeOverride) mode = modeOverride;
+  else try {
+    const m = (llm.getSettings() as { performanceMode?: string }).performanceMode;
+    if (m === 'conservative' || m === 'extreme') mode = m;
   } catch { /* default */ }
-  const weightBudget = gb * frac * 1e9;
-  const eligible = (m: (typeof CATALOG)[number]): boolean =>
-    (m.kind === 'text' || m.kind === 'vision') &&
-    (m.params ?? 999) <= tier.maxParams &&
-    (m.minRamGb ?? 0) <= gb;
-  const byPreference = (a: (typeof CATALOG)[number], b: (typeof CATALOG)[number]): number =>
-    // vision first (so chat handles images), then the largest that still fits the budget
-    Number(b.kind === 'vision') - Number(a.kind === 'vision') ||
-    (b.params ?? 0) - (a.params ?? 0);
-
-  const comfy = CATALOG.filter((m) => eligible(m) && totalBytes(m) <= weightBudget).sort(byPreference);
-  // Fall back progressively: comfy fit → any param-eligible → smallest text model.
-  const pick =
-    comfy[0] ??
-    CATALOG.filter(eligible).sort((a, b) => totalBytes(a) - totalBytes(b))[0] ??
-    CATALOG.filter((m) => m.kind === 'text').sort((a, b) => totalBytes(a) - totalBytes(b))[0];
+  const frac = mode === 'conservative' ? 0.30 : mode === 'extreme' ? 0.55 : 0.38;
+  const budget = gb * frac * 1e9;
+  // 1) Curated default for the tier (16GB → Gemma 4 E2B), if it fits the budget.
+  for (const id of preferredModelIds(gb, mode)) {
+    const e = CATALOG.find((m) => m.id === id);
+    if (e && totalBytes(e as never) <= budget) return { id: e.id, name: e.name };
+  }
+  // 2) Otherwise the size heuristic, capped by recommended params (8B only ≥24GB).
+  const maxParams = Math.min(tier.maxParams, recommendedParamCeiling(gb, mode));
+  const pick = chooseChatModel(CATALOG as never, gb, maxParams, frac) as { id: string; name: string } | null;
   return pick ? { id: pick.id, name: pick.name } : null;
 }
 
@@ -168,9 +160,10 @@ export async function estimateModelFit(modelId: string): Promise<FitEstimate> {
   try {
     const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models');
     const entry = CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId));
+    const { fitLevel } = await import('./model-sizing');
     const weightsGb = (entry?.files?.reduce((s: number, f: { sizeBytes?: number }) => s + (f.sizeBytes ?? 0), 0) ?? 0) / 1e9;
     if (!weightsGb) return { level: 'ok', ramGb: gb, weightsGb: 0, message: '' };
-    const level: FitEstimate['level'] = weightsGb <= gb * 0.38 ? 'ok' : weightsGb <= gb * 0.55 ? 'tight' : 'risky';
+    const level: FitEstimate['level'] = fitLevel(weightsGb, gb);
     const message =
       level === 'ok'
         ? ''
@@ -181,6 +174,78 @@ export async function estimateModelFit(modelId: string): Promise<FitEstimate> {
   } catch {
     return { level: 'ok', ramGb: gb, weightsGb: 0, message: '' };
   }
+}
+
+export interface Recommendation { id: string; name: string; sizeGb: number; ramGb: number; installed: boolean; mode: RecMode }
+
+/** Preview what "Configure for me" would pick for a given mode (no side effects),
+ *  so the setup UI can show the exact model + size before the user commits. */
+export async function getRecommendation(mode?: RecMode): Promise<Recommendation | null> {
+  const pick = await recommendChatModel(mode);
+  if (!pick) return null;
+  const { CATALOG } = await import('@offgrid/models');
+  const entry = CATALOG.find((m) => m.id === pick.id);
+  const sizeGb = (entry?.files?.reduce((s: number, f: { sizeBytes?: number }) => s + (f.sizeBytes ?? 0), 0) ?? 0) / 1e9;
+  let installed = false;
+  try { installed = (await listInstalled()).includes(pick.id); } catch { /* ignore */ }
+  const effMode: RecMode = mode ?? ((): RecMode => {
+    try { const m = (llm.getSettings() as { performanceMode?: string }).performanceMode; return m === 'conservative' || m === 'extreme' ? m : 'balanced'; } catch { return 'balanced'; }
+  })();
+  return { id: pick.id, name: pick.name, sizeGb, ramGb: ramGb(), installed, mode: effMode };
+}
+
+// The non-chat models "Configure for me" also sets up. Binaries (whisper, sd-cli,
+// the TTS runtime) ship in the app; only these MODELS download. Image is heavy
+// (~4GB), so it's skipped in Conservative to keep that mode genuinely light.
+// Whisper has real size tiers, so it scales with the mode (tiny → base → small).
+// TTS (Kokoro 82M) is already tiny and the only quality option, so it stays fixed.
+const STT_MODEL_BY_MODE: Record<RecMode, string> = {
+  conservative: 'ggerganov/whisper.cpp/tiny',   // ~78MB
+  balanced: 'ggerganov/whisper.cpp/base',        // ~148MB
+  extreme: 'ggerganov/whisper.cpp/small',        // ~488MB
+};
+const TTS_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX';   // text-to-speech, ~82M
+const IMAGE_MODEL_ID = 'offgrid-ai/juggernaut-xl-v9-GGUF';    // image gen, ~4.35GB
+
+export type SetupItemKind = 'chat' | 'transcription' | 'voice' | 'image';
+export interface SetupItem {
+  kind: SetupItemKind;
+  capability: string;   // user-facing: "Chat & vision", "Speech-to-text", …
+  id: string;
+  name: string;
+  sizeGb: number;
+  installed: boolean;
+  required: boolean;    // chat is required; the rest are best-effort extras
+}
+export interface SetupPlan { mode: RecMode; ramGb: number; items: SetupItem[]; totalDownloadGb: number }
+
+/** The full set of models "Configure for me" will set up for a mode: the chat/vision
+ *  model plus speech-to-text, text-to-speech, and (outside Conservative) image. Pure
+ *  preview — no downloads — so the UI can list everything before the user commits.
+ *  autoConfigure() consumes the same plan, so the preview and the action never drift. */
+export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
+  const effMode: RecMode = mode ?? ((): RecMode => {
+    try { const m = (llm.getSettings() as { performanceMode?: string }).performanceMode; return m === 'conservative' || m === 'extreme' ? m : 'balanced'; } catch { return 'balanced'; }
+  })();
+  const { CATALOG } = await import('@offgrid/models');
+  let installed: string[] = [];
+  try { installed = await listInstalled(); } catch { /* ignore */ }
+  const sizeOf = (id: string): number => {
+    const e = CATALOG.find((m) => m.id === id);
+    return (e?.files?.reduce((s: number, f: { sizeBytes?: number }) => s + (f.sizeBytes ?? 0), 0) ?? 0) / 1e9;
+  };
+  const nameOf = (id: string, fallback: string): string => CATALOG.find((m) => m.id === id)?.name ?? fallback;
+
+  const items: SetupItem[] = [];
+  const chat = await recommendChatModel(effMode);
+  if (chat) items.push({ kind: 'chat', capability: 'Chat & vision', id: chat.id, name: chat.name, sizeGb: sizeOf(chat.id), installed: installed.includes(chat.id), required: true });
+  const sttId = STT_MODEL_BY_MODE[effMode];
+  items.push({ kind: 'transcription', capability: 'Speech-to-text', id: sttId, name: nameOf(sttId, 'Whisper'), sizeGb: sizeOf(sttId), installed: installed.includes(sttId), required: false });
+  items.push({ kind: 'voice', capability: 'Text-to-speech', id: TTS_MODEL_ID, name: nameOf(TTS_MODEL_ID, 'Kokoro TTS'), sizeGb: sizeOf(TTS_MODEL_ID), installed: installed.includes(TTS_MODEL_ID), required: false });
+  if (effMode !== 'conservative') items.push({ kind: 'image', capability: 'Image generation', id: IMAGE_MODEL_ID, name: nameOf(IMAGE_MODEL_ID, 'Juggernaut XL v9'), sizeGb: sizeOf(IMAGE_MODEL_ID), installed: installed.includes(IMAGE_MODEL_ID), required: false });
+
+  const totalDownloadGb = items.filter((i) => !i.installed).reduce((s, i) => s + i.sizeGb, 0);
+  return { mode: effMode, ramGb: ramGb(), items, totalDownloadGb };
 }
 
 /** "Configure for me": pick → download (if needed) → activate → start → verify. */
@@ -222,9 +287,29 @@ export async function autoConfigure(onProgress?: SetupProgressCb): Promise<{ suc
 
   emit({ phase: 'verify', message: 'Verifying…', modelId: model.id, modelName: model.name });
   const ok = !!(await pingJson(LLAMA_PORT, '/health', 3000));
+
+  // Chat is live — now set up the rest of the baseline (speech-to-text, text-to-
+  // speech, and image outside Conservative). These are best-effort: a failure here
+  // never fails setup, and the chat model being ready already lets the user in.
+  try {
+    const plan = await getSetupPlan();
+    const extras = plan.items.filter((i) => !i.required);
+    const installedNow = await listInstalled();
+    for (const ex of extras) {
+      if (installedNow.includes(ex.id)) { try { await setActiveModalChoice(ex.kind, ex.id); } catch { /* ignore */ } continue; }
+      try {
+        emit({ phase: 'download', message: `Downloading ${ex.capability} (${ex.name})…`, modelId: ex.id, modelName: ex.name, percent: 0 });
+        const r = await downloadModel(ex.id, (p) =>
+          emit({ phase: 'download', message: `Downloading ${ex.capability} (${ex.name})…`, modelId: ex.id, modelName: ex.name, percent: p.percent, downloadedMB: p.downloadedMB, totalMB: p.totalMB }),
+        );
+        if (r.success) await setActiveModalChoice(ex.kind, ex.id);
+      } catch { /* best-effort extra */ }
+    }
+  } catch { /* extras are optional */ }
+
   emit({
     phase: 'done',
-    message: ok ? `Ready — ${model.name} is running.` : `${model.name} installed; the server is still warming up.`,
+    message: ok ? `Ready — ${model.name} + voice & image are set up.` : `${model.name} installed; the server is still warming up.`,
     modelId: model.id,
     modelName: model.name,
   });

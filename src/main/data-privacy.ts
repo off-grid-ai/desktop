@@ -64,6 +64,22 @@ function clearTables(...tables: string[]): void {
   for (const t of tables) { try { db.prepare(`DELETE FROM ${t}`).run(); } catch { /* table may not exist */ } }
 }
 
+// The `meetings` table is written by Pro (data-privacy is core), so we can't own
+// its schema — but it lives in the same DB. After deleting meeting media we drop
+// any row whose audio file is now gone, so the Meetings list never shows ghost
+// rows that 404 on play. Unit-agnostic (works for full clear + age-based prune).
+// Guarded: in the free build there's no meetings table, so this no-ops.
+function pruneDanglingMeetings(): void {
+  try {
+    const db = getDB();
+    const rows = db.prepare('SELECT id, audio_path FROM meetings').all() as { id: number; audio_path: string | null }[];
+    const del = db.prepare('DELETE FROM meetings WHERE id = ?');
+    for (const r of rows) {
+      if (!r.audio_path || !fs.existsSync(r.audio_path)) del.run(r.id);
+    }
+  } catch { /* no meetings table (free build) */ }
+}
+
 // Which SQL tables + directories belong to each category.
 const CHAT_TABLES = ['conversations', 'messages', 'rag_conversations', 'rag_messages', 'chat_summaries'];
 const MEMORY_TABLES = ['memories', 'master_memory', 'entities', 'entity_edges', 'entity_facts', 'entity_sessions'];
@@ -104,6 +120,7 @@ export function clearCategory(id: DataCategory['id'], olderThanDays?: number): {
     case 'meetings':
       if (olderThanDays && olderThanDays > 0) clearDirsOlderThan(olderThanDays, ud('meetings'));
       else clearDirs(ud('meetings'));
+      pruneDanglingMeetings(); // drop rows whose media we just deleted (no ghosts)
       break;
     case 'images':
       clearDirs(ud('generated-images'), ud('artifacts-library'), ud('style-thumbs'));
@@ -121,5 +138,6 @@ export function deleteAllData(): { success: boolean } {
     ud('generated-images'), ud('artifacts-library'), ud('style-thumbs'),
     ud('lancedb'), ud('entity-photos'),
   );
+  pruneDanglingMeetings(); // media is gone now → drop all meeting rows (no ghosts)
   return { success: true };
 }

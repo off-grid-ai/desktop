@@ -65,6 +65,14 @@ export function StoragePanel(): React.ReactElement {
     setBusy(id);
     try { await api?.cancelModelDownload?.(id); await refresh(); } finally { setBusy(null); }
   };
+  const clearOne = async (id: string): Promise<void> => {
+    setBusy(id);
+    try { await api?.clearDownload?.(id); await refresh(); } finally { setBusy(null); }
+  };
+  const clearAllIncomplete = async (): Promise<void> => {
+    setBusy('clear-dl');
+    try { await api?.clearDownloads?.(); await refresh(); } finally { setBusy(null); }
+  };
 
   const active = downloads.filter((d) => d.status === 'downloading');
   const incomplete = downloads.filter((d) => d.status === 'failed' || d.status === 'cancelled');
@@ -98,7 +106,18 @@ export function StoragePanel(): React.ReactElement {
       {/* Active + interrupted downloads */}
       {(active.length > 0 || incomplete.length > 0) && (
         <div className="border-t border-neutral-800/40 px-4 py-2">
-          <div className="mb-1 text-[10px] uppercase tracking-widest text-neutral-600">Downloads</div>
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-[10px] uppercase tracking-widest text-neutral-600">Downloads</span>
+            {incomplete.length > 0 && (
+              <button
+                onClick={clearAllIncomplete}
+                disabled={busy === 'clear-dl'}
+                className="text-[10px] text-neutral-500 transition-colors hover:text-white disabled:opacity-50"
+              >
+                {busy === 'clear-dl' ? 'Clearing…' : `Clear ${incomplete.length} interrupted`}
+              </button>
+            )}
+          </div>
           {active.map((d) => (
             <div key={d.modelId} className="flex items-center gap-3 py-1.5">
               <div className="min-w-0 flex-1">
@@ -125,6 +144,15 @@ export function StoragePanel(): React.ReactElement {
                 className="rounded-md border border-neutral-700 px-2 py-1 text-[10px] text-neutral-300 hover:border-green-500/60 hover:text-white disabled:opacity-50"
               >
                 {busy === d.modelId ? '…' : 'Retry'}
+              </button>
+              <button
+                onClick={() => clearOne(d.modelId)}
+                disabled={busy === d.modelId}
+                aria-label="Dismiss"
+                title="Dismiss and delete the partial file"
+                className="rounded-md p-1 text-neutral-500 transition-colors hover:text-red-400 disabled:opacity-50"
+              >
+                <Trash className="h-3.5 w-3.5" />
               </button>
             </div>
           ))}
