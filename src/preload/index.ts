@@ -35,6 +35,10 @@ try {
       return () => ipcRenderer.removeListener(channel, sub);
     },
     proOff: (channel: string) => ipcRenderer.removeAllListeners(channel),
+    // Loopback HTTP URL for seekable local media (meeting recordings) — <video>
+    // can't reliably stream large files over the custom protocol, so use real HTTP.
+    getMediaUrl: (absPath: string) => ipcRenderer.invoke('media:url', absPath),
+
     // Clipboard manager (local history + quick-paste popup).
     clipboard: {
       list: (limit?: number) => ipcRenderer.invoke('clipboard:list', limit),
