@@ -80,7 +80,8 @@ function createWindow(): void {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false, // REQUIRED for IPC
-      contextIsolation: true
+      contextIsolation: true,
+      plugins: true // Chromium's built-in PDF viewer (chat attachment viewer) needs this
     }
   })
 
