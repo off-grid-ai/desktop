@@ -23,9 +23,9 @@ import { getProFeature } from './components/pro/proCatalog';
 import { NotificationProvider, useNotifications } from './hooks/useNotifications';
 import { ReprocessingProvider, useReprocessing } from './hooks/useReprocessing';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { StarsBackground } from './components/ui/stars-background';
-import { ShootingStars } from './components/ui/shooting-stars';
+import { GridBackdrop } from './components/ui/grid-backdrop';
 import { Sidebar, SidebarBody } from './components/ui/sidebar';
+import { NavThemeToggle } from './components/ThemeToggle';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   IconMessageCircle,
@@ -119,6 +119,10 @@ function AppContent() {
   const [selectedMemoryId, setSelectedMemoryId] = useState<number | null>(null);
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  // Search filter + sort live here (not in the screen) so they survive navigating
+  // to a result and back.
+  const [searchSources, setSearchSources] = useState<string[]>([]);
+  const [searchSort, setSearchSort] = useState<'relevance' | 'recency' | 'match'>('relevance');
   const [replayTarget, setReplayTarget] = useState<number | null>(null);
   // A search hit can deep-link to a specific meeting; cleared on leaving Meetings.
   const [meetingTarget, setMeetingTarget] = useState<number | null>(null);
@@ -385,6 +389,10 @@ function AppContent() {
     if (hit.kind === 'entity' || hit.kind === 'fact') { handleSelectEntity(hit.refId); return; }
     if (hit.kind === 'memory') { handleSelectMemory(hit.refId); return; }
     if (hit.kind === 'meeting') { setMeetingTarget(hit.refId || null); setViewMode('meetings'); return; }
+    // Chat conversation → open that exact chat (its id is carried in `url`).
+    if (hit.kind === 'chat') { setChatTarget(hit.url ? { conversationId: hit.url } : null); setViewMode('memory-chat'); return; }
+    // Knowledge-base doc → open its project (project_id carried in `url`).
+    if (hit.kind === 'doc') { setChatTarget(hit.url ? { projectId: hit.url } : null); setViewMode('memory-chat'); return; }
     // Screen capture → seek Replay to that exact moment (the captured frame is the
     // point; the source URL may be stale/missing).
     setReplayTarget(hit.ts || Date.now());
@@ -500,9 +508,8 @@ function AppContent() {
           )}
         </button>
       )}
-      {/* Background effects */}
-      <StarsBackground className="absolute inset-0 z-0" />
-      <ShootingStars />
+      {/* Background — flat Off Grid terminal grid (theme-aware) */}
+      <GridBackdrop className="z-0" />
 
       <div className="flex h-full relative z-10">
         {/* Aceternity Sidebar */}
@@ -571,6 +578,7 @@ function AppContent() {
 
             {/* Pinned bottom */}
             <div className="flex flex-col gap-1 border-t border-neutral-200 pt-2 dark:border-neutral-800">
+              <NavThemeToggle expanded={sidebarOpen} />
               {bottomNav.map(renderNavItem)}
             </div>
           </SidebarBody>
@@ -623,6 +631,7 @@ function AppContent() {
                       onNavigateToMemory={handleSelectMemory}
                       onNavigateToChat={handleSelectChat}
                       onNavigateToEntity={handleSelectEntity}
+                      onSeekReplay={(ts) => { setReplayTarget(ts || Date.now()); setViewMode('replay'); }}
                       openTarget={chatTarget}
                       onTargetConsumed={() => setChatTarget(null)}
                     />
@@ -650,6 +659,11 @@ function AppContent() {
                       actionsMode,
                       setActionsMode,
                       searchQuery,
+                      onSearchQueryChange: setSearchQuery,
+                      searchSources,
+                      onSearchSourcesChange: setSearchSources,
+                      searchSort,
+                      onSearchSortChange: setSearchSort,
                       selectedMemoryId,
                       setSelectedMemoryId,
                       rec,
