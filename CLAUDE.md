@@ -46,6 +46,16 @@ This is a hard rule, not a preference. **Before writing ANY new component, panel
 - Only build new when nothing fits, and say why.
 - UI follows the approved-library + brand-token rules in `docs/DESIGN.md`; icons are `@phosphor-icons/react` only (never lucide).
 
+## Open core — pro feature code lives in the pro repo
+
+**All code for pro features lives in the `desktop-pro` repo (`pro/`), never in core (`desktop`).** Core is public (AGPL); shipping pro source in it defeats open core. This is a hard rule, not a preference.
+
+- A new pro feature: backend → `pro/main/`, UI → `pro/renderer/`, wired in via pro's `activateMain` / view-router — not core `index.ts`, not core `src/renderer`.
+- Core only carries the **inert shell** for a pro surface: a `proCatalog` entry + a `locked: !isPro` nav item that shows `UpgradeScreen`, or a dimmed `ProPlaceholder` in Settings. No pro business logic, handlers, or data flow in core.
+- Pro renderer reaches its IPC through the generic `proInvoke` / `proOn` passthrough — do NOT add per-feature namespaces to the core preload for pro features.
+- Shared, reusable **engines** (e.g. `@offgrid/clipboard`) stay in `shared/` and may be consumed by either tier; it's the desktop **pro integration** that must live in `pro/`.
+- `proEnabled()` (main) / `isPro` (renderer) gate activation; `OFFGRID_PRO=0` forces free. Gating alone is not enough — the source must also physically live in `pro/`.
+
 ## Architecture & abstractions (SOLID)
 
 Design to abstractions, not concrete types. When implementations are interchangeable (model backends, TTS/STT engines, image/diffusion runtimes, connectors), the rest of the app depends on one service/interface — never branch on a concrete type in UI/stores (`if (engine === 'kokoro')`, `instanceof X`). Push the decision behind the abstraction; adding an implementation should need zero changes to callers. Normalize capability gaps inside the service, not the UI.
