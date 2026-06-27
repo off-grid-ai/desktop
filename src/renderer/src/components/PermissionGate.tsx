@@ -4,8 +4,9 @@ import { StarsBackground } from './ui/stars-background';
 import { ShootingStars } from './ui/shooting-stars';
 import { BorderBeam } from './ui/border-beam';
 import { cn } from '@renderer/lib/utils';
-import { Shield, Eye, Check, X, Gear as Settings, ArrowsClockwise as RefreshCw, Cpu } from '@phosphor-icons/react';
+import { Shield, Eye, Check, X, ArrowsClockwise as RefreshCw, Cpu } from '@phosphor-icons/react';
 import { ModelsScreen } from './ModelsScreen';
+import { SetupPanel } from './setup/SetupPanel';
 
 interface PermissionGateProps {
   children: React.ReactNode;
@@ -242,85 +243,48 @@ export function PermissionGate({ children }: PermissionGateProps) {
               : 'Download a model to get started. Everything runs locally on your device — no cloud, no account.'}
           </motion.p>
 
-          {/* Cards — capture permissions are Pro-only; the model is always required. */}
-          <div className={cn('grid gap-4 mb-8', isPro ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1 max-w-sm mx-auto')}>
-            {isPro && (
-              <PermissionCard
-                title="Accessibility"
-                description="Read text from AI chat windows"
-                icon={<Eye className="w-5 h-5" />}
-                granted={permissionStatus?.accessibility ?? false}
-                onOpenSettings={handleOpenAccessibilitySettings}
-                delay={0.6}
-              />
-            )}
+          {/* The model: one-click "Configure for me" + manual browse (shared with
+              Settings). On success it flips modelStatus and the gate clears. */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.6, duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+            className="mb-8"
+          >
+            <SetupPanel hideHealth onConfigured={checkModelStatus} />
+          </motion.div>
 
-            {isPro && (
-              <PermissionCard
-                title="Screen Recording"
-                description="Capture visual context for OCR"
-                icon={<Shield className="w-5 h-5" />}
-                granted={permissionStatus?.screenRecording ?? false}
-                onOpenSettings={handleOpenScreenRecordingSettings}
-                delay={0.7}
-              />
-            )}
-
-            {/* AI Model - opens the catalog (text, vision, image, voice, transcription) */}
-            <motion.button
-              initial={{ opacity: 0, y: 10 }}
+          {/* Capture permissions — Pro only. */}
+          {isPro && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.8, duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-              onClick={() => setShowModels(true)}
-              className="flex h-full flex-col gap-3 rounded-xl border border-neutral-800 bg-neutral-900/60 p-4 text-left transition-colors hover:border-green-500/60"
+              className="mb-8"
             >
-              <div className="flex items-center justify-between">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-neutral-800 bg-neutral-800/60">
-                  <Cpu className="h-5 w-5 text-neutral-500" />
-                </div>
-                <span className="whitespace-nowrap text-xs text-green-500">
-                  {modelStatus?.downloaded ? 'Done' : 'Browse →'}
-                </span>
+              <div className="mb-3 text-[10px] font-medium uppercase tracking-widest text-neutral-600">
+                Capture permissions
               </div>
-              <div className="flex-1">
-                <div className="text-sm font-medium text-white">AI Model</div>
-                <div className="text-xs text-neutral-500">
-                  {modelStatus?.downloaded ? 'Model ready' : 'Choose & download a model'}
-                </div>
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <PermissionCard
+                  title="Accessibility"
+                  description="Read text from AI chat windows"
+                  icon={<Eye className="w-5 h-5" />}
+                  granted={permissionStatus?.accessibility ?? false}
+                  onOpenSettings={handleOpenAccessibilitySettings}
+                  delay={0.85}
+                />
+                <PermissionCard
+                  title="Screen Recording"
+                  description="Capture visual context for OCR"
+                  icon={<Shield className="w-5 h-5" />}
+                  granted={permissionStatus?.screenRecording ?? false}
+                  onOpenSettings={handleOpenScreenRecordingSettings}
+                  delay={0.9}
+                />
               </div>
-            </motion.button>
-          </div>
-
-          {/* Instructions */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.9, duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-            className="bg-neutral-900/40 border border-neutral-800/60 rounded-xl p-4 mb-6"
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <Settings className="w-3.5 h-3.5 text-neutral-600" />
-              <span className="text-[10px] font-medium text-neutral-600 uppercase tracking-widest">
-                {isPro ? 'How to enable' : 'Get started'}
-              </span>
-            </div>
-            <div className="space-y-2 text-sm text-neutral-500">
-              {isPro ? (
-                <>
-                  <p>1. Click <span className="text-neutral-400">Open Settings</span> for each permission</p>
-                  <p>2. Find <span className="text-neutral-400">Off Grid AI</span> in the list</p>
-                  <p>3. Toggle the switch to enable</p>
-                  <p>4. Click <span className="text-neutral-400">Browse</span> to download a model</p>
-                </>
-              ) : (
-                <>
-                  <p>1. Click <span className="text-neutral-400">Browse</span> on the AI Model card</p>
-                  <p>2. Pick a model and <span className="text-neutral-400">Download</span> it</p>
-                  <p>3. Hit <span className="text-neutral-400">Use</span> — the app opens automatically</p>
-                </>
-              )}
-            </div>
-          </motion.div>
+            </motion.div>
+          )}
 
           {/* Refresh Button */}
           <motion.button

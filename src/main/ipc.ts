@@ -1369,6 +1369,84 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       import('./models-manager').then((m) => m.setActiveModalChoice(kind, modelId)));
   ipcMain.handle('models:active-modalities', () => import('./models-manager').then((m) => m.getActiveModalities()));
 
+  // Storage + download manager
+  ipcMain.handle('models:storage', () => import('./models-manager').then((m) => m.getStorageInfo()));
+  ipcMain.handle('models:delete-orphans', () => import('./models-manager').then((m) => m.deleteOrphans()));
+  ipcMain.handle('models:downloads', () => import('./models-manager').then((m) => m.listDownloads()));
+  ipcMain.handle('models:retry-download', async (_, modelId: string) => {
+      const { retryDownload } = await import('./models-manager');
+      return retryDownload(modelId, (p) =>
+          BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('model:download-progress', p)));
+  });
+  // Import a local .gguf from disk (file picker → validate → copy → register).
+  ipcMain.handle('models:import', async () => {
+      const { dialog } = await import('electron');
+      const r = await dialog.showOpenDialog({
+          title: 'Import a local model',
+          properties: ['openFile'],
+          filters: [{ name: 'GGUF model', extensions: ['gguf'] }],
+      });
+      if (r.canceled || !r.filePaths[0]) return { canceled: true };
+      const { importLocalModel } = await import('./models-manager');
+      return importLocalModel(r.filePaths[0], (p) =>
+          BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('model:download-progress', p)));
+  });
+
+  // --- Setup + system health -----------------------------------------------
+  // One aggregated snapshot of every local component (chat LLM, gateway, vision,
+  // embeddings, STT, TTS, image gen) for the Settings → Health panel.
+  ipcMain.handle('system:health', () => import('./setup').then((m) => m.getSystemHealth()));
+  // "Configure for me": pick a RAM-appropriate model, download, activate, start,
+  // verify. Streams progress back to all windows via 'setup:progress'.
+  ipcMain.handle('setup:auto-configure', async () => {
+      const { autoConfigure } = await import('./setup');
+      return autoConfigure((p) =>
+          BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('setup:progress', p)));
+  });
+  // Restart a component. Currently only the chat LLM (llama-server) is restartable.
+  ipcMain.handle('system:restart', async (_e, id: string) => {
+      // Free the port of ANY process holding it (not just our own), then start ours.
+      const freePort = async (port: number): Promise<void> => {
+          try {
+              const { execSync } = await import('child_process');
+              const pids = execSync(`lsof -ti tcp:${port}`, { encoding: 'utf-8' }).trim().split('\n').filter(Boolean);
+              for (const pid of pids) { try { process.kill(Number(pid), 'SIGKILL'); } catch { /* gone */ } }
+              if (pids.length) await new Promise((r) => setTimeout(r, 400)); // let the port free
+          } catch { /* nothing on the port */ }
+      };
+      if (id === 'chat') {
+          await freePort(8439);
+          const { llm } = await import('./llm');
+          await llm.restart();
+          return { success: true };
+      }
+      if (id === 'gateway') {
+          const { startModelServer, stopModelServer } = await import('./model-server');
+          try { stopModelServer(); } catch { /* not running */ }
+          await freePort(7878);
+          startModelServer();
+          return { success: true };
+      }
+      return { success: false, error: `cannot restart "${id}"` };
+  });
+  // Pre-activate RAM fit estimate (for a warning before loading a big model).
+  ipcMain.handle('system:estimate-fit', (_e, modelId: string) =>
+      import('./setup').then((m) => m.estimateModelFit(modelId)));
+
+  // Open an https link in the user's default browser (e.g. a model's HF page).
+  ipcMain.handle('app:open-external', async (_e, url: string) => {
+      if (!/^https:\/\//.test(url)) return { success: false };
+      const { shell } = await import('electron');
+      await shell.openExternal(url);
+      return { success: true };
+  });
+
+  // Data & privacy — see and delete on-device data from one place.
+  ipcMain.handle('data:summary', () => import('./data-privacy').then((m) => m.getDataSummary()));
+  ipcMain.handle('data:clear', (_e, id: string, olderThanDays?: number) =>
+      import('./data-privacy').then((m) => m.clearCategory(id as 'chats' | 'memories' | 'captures' | 'meetings' | 'images', olderThanDays)));
+  ipcMain.handle('data:delete-all', () => import('./data-privacy').then((m) => m.deleteAllData()));
+
   // --- Image generation (stable-diffusion.cpp) ----------------------------
   ipcMain.handle('imagegen:status', async () => {
       const { imageGenStatus } = await import('./imagegen');

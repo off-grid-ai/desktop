@@ -1,0 +1,39 @@
+{
+  "name": "@offgrid/sync",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Off Grid sync engine: device pairing, discovery, encrypted framed messaging, and transfer. Platform-agnostic; embeddable in desktop and mobile via a TransportBridge. Extracted from EasyShare.",
+  "license": "AGPL-3.0-only",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/adapters/node-tcp.d.ts",
+      "import": "./dist/adapters/node-tcp.mjs",
+      "require": "./dist/adapters/node-tcp.js"
+    },
+    "./node-discovery": {
+      "types": "./dist/adapters/node-discovery.d.ts",
+      "import": "./dist/adapters/node-discovery.mjs",
+      "require": "./dist/adapters/node-discovery.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts src/adapters/node-tcp.ts src/adapters/node-discovery.ts --format esm,cjs --dts",
+    "dev": "tsup src/index.ts src/adapters/node-tcp.ts src/adapters/node-discovery.ts --format esm,cjs --dts --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test test/"
+  },
+  "dependencies": {
+    "bonjour-service": "^1.2.1",
+    "js-sha512": "^0.9.0",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1"
+  }
+}

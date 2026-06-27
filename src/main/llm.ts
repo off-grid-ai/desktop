@@ -1,4 +1,5 @@
 import { spawn, execSync, ChildProcess } from "child_process";
+import os from "os";
 import { Mutex } from "async-mutex";
 import { callHook } from "./bootstrap/hookRegistry";
 import path from "path";
@@ -6,7 +7,21 @@ import * as fs from "fs";
 import * as http from "http";
 import { modelsDir as getModelsDir, binRoots, isPackaged, onHostQuit } from "./runtime-env";
 
+export type KvCacheType = "f16" | "q8_0" | "q4_0";
+export type PerformanceMode = "conservative" | "balanced" | "extreme";
+
+// Friendly presets that decide how much of the machine the local model uses.
+// Conservative leaves lots of headroom (safest on small / busy machines);
+// Extreme pushes context/memory for max capability. The RAM clamp still applies
+// on top, so even Extreme can't overcommit into a freeze.
+const MODE_PRESETS: Record<PerformanceMode, { ctxSize: number; kvCacheType: KvCacheType; flashAttn: boolean }> = {
+  conservative: { ctxSize: 8192, kvCacheType: "q8_0", flashAttn: true },
+  balanced: { ctxSize: 32768, kvCacheType: "f16", flashAttn: false },
+  extreme: { ctxSize: 131072, kvCacheType: "f16", flashAttn: false },
+};
+
 export interface LlmSettings {
+  performanceMode?: PerformanceMode;
   temperature?: number;
   ctxSize?: number;
   topP?: number;
@@ -15,6 +30,12 @@ export interface LlmSettings {
   repeatPenalty?: number;
   maxTokens?: number;
   systemPrompt?: string;
+  // Launch-time (require a server respawn to take effect):
+  kvCacheType?: KvCacheType; // quantize the KV cache to cut memory (needs flash-attn)
+  flashAttn?: boolean;       // FlashAttention: faster + lower memory; required for quantized KV
+  gpuLayers?: number;        // -ngl: layers offloaded to GPU (Metal). 99 = all.
+  threads?: number;          // CPU threads for inference
+  batchSize?: number;        // -b: prompt batch size
 }
 
 export class LLMService {
@@ -53,6 +74,19 @@ export class LLMService {
   private repeatPenalty: number | undefined;
   private maxTokens = 2048;
   private systemPrompt = '';
+  // Resource-usage preset. Governs the RAM budget the context clamp targets and
+  // the default ctx/KV preset. 'balanced' preserves prior behavior.
+  private performanceMode: PerformanceMode = "balanced";
+  // Launch-time params (need a respawn). Defaults match prior hardcoded behavior.
+  private kvCacheType: KvCacheType = "f16";
+  private flashAttn = false;
+  private gpuLayers = 99;
+  private threads: number | undefined;
+  private batchSize: number | undefined;
+  // Crash recovery: distinguish an intentional kill (stop/reload/settings respawn)
+  // from an unexpected crash so we only auto-restart on real crashes.
+  private intentionalStop = false;
+  private crashCount = 0;
   private get settingsFile(): string { return path.join(getModelsDir(), "llm-settings.json"); }
 
   constructor() {
@@ -67,7 +101,57 @@ export class LLMService {
       if (typeof s.repeatPenalty === "number") this.repeatPenalty = s.repeatPenalty;
       if (typeof s.maxTokens === "number") this.maxTokens = s.maxTokens;
       if (typeof s.systemPrompt === "string") this.systemPrompt = s.systemPrompt;
+      if (s.kvCacheType === "f16" || s.kvCacheType === "q8_0" || s.kvCacheType === "q4_0") this.kvCacheType = s.kvCacheType;
+      if (typeof s.flashAttn === "boolean") this.flashAttn = s.flashAttn;
+      if (typeof s.gpuLayers === "number") this.gpuLayers = s.gpuLayers;
+      if (typeof s.threads === "number") this.threads = s.threads;
+      if (typeof s.batchSize === "number") this.batchSize = s.batchSize;
+      if (s.performanceMode === "conservative" || s.performanceMode === "balanced" || s.performanceMode === "extreme") this.performanceMode = s.performanceMode;
     } catch { /* defaults */ }
+  }
+
+  // RAM budget the context clamp targets, by resource-usage mode. Conservative
+  // leaves more free; Extreme uses most of RAM. The clamp + GGUF math still apply.
+  private modeBudget(): { frac: number; reserveGb: number } {
+    switch (this.performanceMode) {
+      case "conservative": return { frac: 0.45, reserveGb: 2.0 };
+      case "extreme": return { frac: 0.82, reserveGb: 1.0 };
+      default: return { frac: 0.65, reserveGb: 1.5 };
+    }
+  }
+
+  // Clamp the requested context window to what THIS machine + THIS model can hold
+  // without overcommitting unified memory. A big -c allocates a KV cache up front
+  // (with -ngl 99 it's resident in unified memory alongside the weights); on a
+  // 16GB Mac an 8B model at 64k blew past physical RAM and FROZE macOS. We size a
+  // KV budget from total RAM minus the model weights minus headroom for the OS,
+  // Electron, and Metal compute, then cap context to fit. Better a shorter context
+  // than a hard freeze; users on big machines still get a large window (it scales).
+  private safeCtxSize(requested: number): number {
+    try {
+      const totalGb = os.totalmem() / 1e9;
+      let weightsGb = 0;
+      try { weightsGb += fs.statSync(this.modelPath).size / 1e9; } catch { /* unknown */ }
+      try { if (this.mmProjPath) weightsGb += fs.statSync(this.mmProjPath).size / 1e9; } catch { /* unknown */ }
+      // Keep total resident under the mode's RAM fraction; reserve headroom for
+      // OS/app/compute. Conservative ≈ 45%, Balanced ≈ 65%, Extreme ≈ 82%.
+      const { frac, reserveGb } = this.modeBudget();
+      const kvBudgetGb = Math.max(0.5, totalGb * frac - weightsGb - reserveGb);
+      // Conservative KV-cache cost per 1k tokens (~8B-class). f16 is the baseline;
+      // quantized KV roughly halves (q8_0) or quarters (q4_0) the footprint, so a
+      // larger context fits safely. Overestimating is the safe direction.
+      const perKTokGb = this.kvCacheType === "q4_0" ? 0.05 : this.kvCacheType === "q8_0" ? 0.085 : 0.16;
+      const ctxCap = Math.floor((kvBudgetGb / perKTokGb) * 1000);
+      const safe = Math.max(2048, Math.min(requested, ctxCap));
+      const rounded = Math.floor(safe / 1024) * 1024;
+      if (rounded < requested) {
+        console.warn(`[LLMService] Clamping context ${requested} -> ${rounded} (RAM ${totalGb.toFixed(0)}GB, weights ${weightsGb.toFixed(1)}GB) to avoid memory overcommit`);
+      }
+      return rounded;
+    } catch {
+      // If anything goes wrong reading sizes, fall back to a universally-safe value.
+      return Math.min(requested, 8192);
+    }
   }
 
   getSettings(): LlmSettings {
@@ -76,7 +160,12 @@ export class LLMService {
       topP: this.topP, topK: this.topK, minP: this.minP,
       repeatPenalty: this.repeatPenalty, maxTokens: this.maxTokens,
       systemPrompt: this.systemPrompt,
-    };
+      kvCacheType: this.kvCacheType, flashAttn: this.flashAttn,
+      gpuLayers: this.gpuLayers, threads: this.threads, batchSize: this.batchSize,
+      performanceMode: this.performanceMode,
+      // Report the EFFECTIVE (clamped) context so the UI can show what's really used.
+      effectiveCtxSize: this.safeCtxSize(this.ctxSize),
+    } as LlmSettings & { effectiveCtxSize: number };
   }
 
   /** Sampling params to merge into a request payload (only those the user set). */
@@ -89,9 +178,26 @@ export class LLMService {
     return p;
   }
 
-  /** Update inference settings; respawns the server if the context window changed. */
+  /** Update inference settings; respawns the server if any launch-time arg changed
+   *  (context, KV-cache type, flash-attn, GPU layers, threads, batch). */
   async setSettings(s: LlmSettings): Promise<void> {
-    const ctxChanged = typeof s.ctxSize === "number" && s.ctxSize !== this.ctxSize;
+    // A resource-usage mode change applies its preset first (explicit fields in the
+    // same patch still override it below). Always treated as a launch change.
+    let modeChanged = false;
+    if ((s.performanceMode === "conservative" || s.performanceMode === "balanced" || s.performanceMode === "extreme") && s.performanceMode !== this.performanceMode) {
+      this.performanceMode = s.performanceMode;
+      const p = MODE_PRESETS[s.performanceMode];
+      this.ctxSize = p.ctxSize; this.kvCacheType = p.kvCacheType; this.flashAttn = p.flashAttn;
+      modeChanged = true;
+    }
+    // Launch-time args: changing any of these requires a server respawn.
+    const launchChanged = modeChanged ||
+      (typeof s.ctxSize === "number" && s.ctxSize !== this.ctxSize) ||
+      (s.kvCacheType !== undefined && s.kvCacheType !== this.kvCacheType) ||
+      (typeof s.flashAttn === "boolean" && s.flashAttn !== this.flashAttn) ||
+      (typeof s.gpuLayers === "number" && s.gpuLayers !== this.gpuLayers) ||
+      (typeof s.threads === "number" && s.threads !== this.threads) ||
+      (typeof s.batchSize === "number" && s.batchSize !== this.batchSize);
     if (typeof s.temperature === "number") this.temperature = s.temperature;
     if (typeof s.ctxSize === "number") this.ctxSize = s.ctxSize;
     if (typeof s.topP === "number") this.topP = s.topP;
@@ -100,8 +206,15 @@ export class LLMService {
     if (typeof s.repeatPenalty === "number") this.repeatPenalty = s.repeatPenalty;
     if (typeof s.maxTokens === "number") this.maxTokens = s.maxTokens;
     if (typeof s.systemPrompt === "string") this.systemPrompt = s.systemPrompt;
+    if (s.kvCacheType === "f16" || s.kvCacheType === "q8_0" || s.kvCacheType === "q4_0") this.kvCacheType = s.kvCacheType;
+    if (typeof s.flashAttn === "boolean") this.flashAttn = s.flashAttn;
+    if (typeof s.gpuLayers === "number") this.gpuLayers = s.gpuLayers;
+    if (typeof s.threads === "number") this.threads = s.threads;
+    if (typeof s.batchSize === "number") this.batchSize = s.batchSize;
+    // Quantized KV cache requires FlashAttention — auto-enable it so the pair is valid.
+    if (this.kvCacheType !== "f16" && !this.flashAttn) this.flashAttn = true;
     try { fs.writeFileSync(this.settingsFile, JSON.stringify(this.getSettings())); } catch { /* ignore */ }
-    if (ctxChanged && !this.paused) {
+    if (launchChanged && !this.paused) {
       this.stop();
       await this.init();
     }
@@ -122,17 +235,24 @@ export class LLMService {
     } catch {
       // no active selection yet
     }
-    this.modelPath = path.join(modelsDir, "Qwen3-VL-4B-Instruct-Q4_K_M.gguf");
-    this.mmProjPath = path.join(modelsDir, "mmproj-Qwen3VL-4B-Instruct-F16.gguf");
+    // No active selection yet. Point at a real catalog vision model so that IF
+    // its files happen to be present we still load; otherwise modelsExist() is
+    // false and setup ("Configure for me") downloads + activates a fitting model.
+    // (The old default named a non-existent Qwen3-VL-4B and dead-ended fresh
+    // installs at a 502 — never auto-resolvable. Keep this aligned with the catalog.)
+    this.modelPath = path.join(modelsDir, "gemma-4-E4B-it-Q4_K_M.gguf");
+    this.mmProjPath = path.join(modelsDir, "mmproj-gemma-4-E4B-it-F16.gguf");
   }
 
   /** Switch the active model and force a reload on next init. */
   reloadModel(): void {
     if (this.server) {
+      this.intentionalStop = true; // a model swap, not a crash
       this.server.kill();
       this.server = null;
     }
     this.initialized = false;
+    this.crashCount = 0; // new model — start its crash budget fresh
     this.resolveModel();
   }
 
@@ -146,6 +266,20 @@ export class LLMService {
 
   getModelsDir(): string {
     return getModelsDir();
+  }
+
+  /** Cheap integrity check: a real GGUF starts with the "GGUF" magic and is more
+   *  than a few bytes. Catches truncated/corrupt downloads before we hand the file
+   *  to llama-server (which would otherwise crash on load). */
+  private validateGguf(p: string): boolean {
+    try {
+      if (fs.statSync(p).size < 1024) return false;
+      const fd = fs.openSync(p, "r");
+      const buf = Buffer.alloc(4);
+      fs.readSync(fd, buf, 0, 4, 0);
+      fs.closeSync(fd);
+      return buf.toString("ascii") === "GGUF";
+    } catch { return false; }
   }
 
   async init(): Promise<void> {
@@ -170,6 +304,18 @@ export class LLMService {
       console.error(`[LLMService] Expected model: ${this.modelPath}`);
       console.error(`[LLMService] Expected mmproj: ${this.mmProjPath}`);
       throw new Error("Models not downloaded. Please complete onboarding to download the AI model.");
+    }
+
+    // Integrity check: a corrupt/truncated weights file would crash llama-server
+    // on load. Fail with a clear message so the UI can prompt a re-download.
+    if (!this.validateGguf(this.modelPath)) {
+      console.error(`[LLMService] Model file failed GGUF validation (corrupt/truncated): ${this.modelPath}`);
+      throw new Error("The model file looks corrupt or incomplete. Re-download it from the Models screen.");
+    }
+    // mmproj is optional — if it's corrupt, drop it (text still works) rather than fail.
+    if (this.mmProjPath && !this.validateGguf(this.mmProjPath)) {
+      console.warn(`[LLMService] mmproj failed validation; loading text-only: ${this.mmProjPath}`);
+      this.mmProjPath = "";
     }
 
     // Prefer the updated, self-contained llama.cpp build in bin/llama (supports
@@ -207,9 +353,18 @@ export class LLMService {
     args.push(
       "--port", String(this.port),
       "--host", "127.0.0.1",
-      "-c", String(this.ctxSize),
-      "-ngl", "99"
+      "-c", String(this.safeCtxSize(this.ctxSize)),
+      "-ngl", String(this.gpuLayers)
     );
+    // FlashAttention: faster + lower memory. Required for a quantized KV cache.
+    if (this.flashAttn || this.kvCacheType !== "f16") args.push("--flash-attn", "on");
+    // Quantized KV cache (q8_0/q4_0) shrinks the per-token memory footprint — the
+    // single biggest lever against memory-overcommit freezes on big contexts.
+    if (this.kvCacheType !== "f16") {
+      args.push("--cache-type-k", this.kvCacheType, "--cache-type-v", this.kvCacheType);
+    }
+    if (typeof this.threads === "number") args.push("-t", String(this.threads));
+    if (typeof this.batchSize === "number") args.push("-b", String(this.batchSize));
     // Kill any lingering server before spawning (defends against a crashed or
     // orphaned instance still holding the port / RAM).
     if (this.server) {
@@ -251,18 +406,47 @@ export class LLMService {
 
     this.server.on("close", (code) => {
         console.log(`[llama-server] exited with code ${code}`);
+        const wasIntentional = this.intentionalStop;
+        this.intentionalStop = false;
         this.server = null;
         this.initialized = false;
+        // Unexpected exit while we expected it running = a crash. Auto-recover.
+        if (!wasIntentional && !this.paused) this.handleCrash(code ?? -1);
     });
 
     try {
         await this.waitForReady();
         console.log("[LLMService] Vision server ready!");
         this.initialized = true;
+        this.crashCount = 0; // a clean start resets the crash escalation
     } catch (e) {
         console.error("[LLMService] Failed to start server:", e);
         this.stop();
     }
+  }
+
+  /** Auto-recover from an unexpected llama-server crash. Backs off, and on repeated
+   *  crashes shrinks the context (the usual culprit is memory pressure) before
+   *  retrying. Gives up after a few attempts so we never spin forever. */
+  private async handleCrash(code: number): Promise<void> {
+    this.crashCount++;
+    if (this.crashCount > 3) {
+      console.error(`[LLMService] llama-server crashed ${this.crashCount}x (last code ${code}); giving up auto-restart`);
+      return;
+    }
+    // On the 2nd+ crash, halve the context — most repeat crashes are OOM/overcommit.
+    if (this.crashCount >= 2) {
+      const reduced = Math.max(2048, Math.floor((this.ctxSize / 2) / 1024) * 1024);
+      if (reduced < this.ctxSize) {
+        console.warn(`[LLMService] reducing context ${this.ctxSize} -> ${reduced} after repeated crashes`);
+        this.ctxSize = reduced;
+        try { fs.writeFileSync(this.settingsFile, JSON.stringify(this.getSettings())); } catch { /* ignore */ }
+      }
+    }
+    await new Promise((r) => setTimeout(r, 1000 * this.crashCount));
+    if (this.paused || this.intentionalStop) return;
+    console.log(`[LLMService] auto-restarting llama-server (attempt ${this.crashCount})`);
+    this.init().catch(() => {});
   }
 
   private async waitForReady(timeout = 60000): Promise<void> {
@@ -524,6 +708,7 @@ export class LLMService {
 
   stop() {
     if (this.server) {
+        this.intentionalStop = true; // deliberate shutdown — don't auto-restart
         this.server.kill();
         this.server = null;
         this.initialized = false;
@@ -544,6 +729,16 @@ export class LLMService {
 
   isReady() {
       return this.initialized;
+  }
+
+  /** Hard restart: kill the server and spawn it fresh (picks up a model swap or
+   *  recovers a crashed/hung instance). Used by "Configure for me" and the
+   *  Health panel's restart action. */
+  async restart(): Promise<void> {
+      this.stop();
+      this.initialized = false;
+      this.resolveModel();
+      await this.init();
   }
 }
 

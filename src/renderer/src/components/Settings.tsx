@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { LockKey } from '@phosphor-icons/react';
 import { ProgressiveBlur } from './ui/progressive-blur';
+import { SetupPanel } from './setup/SetupPanel';
+import { StoragePanel } from './setup/StoragePanel';
+import { DataPrivacyPanel } from './setup/DataPrivacyPanel';
 
 // A Pro section shown (disabled) in the free build: title + description + a
 // "Pro · July 2026" badge, dimmed and non-interactive.
@@ -128,110 +131,49 @@ function SecretaryPrefs(): React.ReactElement {
   );
 }
 
-type ConsoleStatus = Awaited<ReturnType<typeof window.api.consoleStatus>>;
 
-const inputCls =
-  'w-full rounded-xl bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 outline-none focus:border-neutral-600';
-const btnCls =
-  'px-4 py-2 rounded-xl bg-neutral-800 border border-neutral-700 text-white text-sm font-medium disabled:opacity-50 hover:bg-neutral-700 transition-colors';
+type PerfMode = 'conservative' | 'balanced' | 'extreme';
+const PERF_MODES: { id: PerfMode; label: string; desc: string }[] = [
+  { id: 'conservative', label: 'Conservative', desc: 'Lightest footprint — small context, quantized cache. Best on busy or smaller Macs.' },
+  { id: 'balanced', label: 'Balanced', desc: 'Sensible default — good context within a safe share of your RAM.' },
+  { id: 'extreme', label: 'Extreme', desc: 'Maximum capability — largest context your RAM allows. Heaviest on memory.' },
+];
 
-function ConsoleSection() {
-  const [url, setUrl] = useState('');
-  const [token, setToken] = useState('');
-  const [status, setStatus] = useState<ConsoleStatus | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-
-  const refresh = (): void => {
-    window.api.consoleStatus().then(setStatus);
+// Resource-usage preset: decides how much of the machine the local AI uses.
+// Writes performanceMode; the backend applies the preset + reloads the model.
+function ResourceModeSection(): React.ReactElement {
+  const [mode, setMode] = useState<PerfMode>('balanced');
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window.api as any).getLlmSettings?.().then((s: { performanceMode?: PerfMode }) => { if (s?.performanceMode) setMode(s.performanceMode); }).catch(() => {});
+  }, []);
+  const pick = (m: PerfMode): void => {
+    setMode(m);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window.api as any).setLlmSettings?.({ performanceMode: m });
   };
-  useEffect(refresh, []);
-
-  const connect = async (): Promise<void> => {
-    if (!url.trim() || !token.trim()) return;
-    setBusy(true);
-    setError('');
-    const res = await window.api.consoleEnroll(url.trim(), token.trim());
-    setBusy(false);
-    if (res.enrolled) {
-      setToken('');
-      refresh();
-    } else {
-      setError(res.error || 'enrollment failed');
-    }
-  };
-
-  const disconnect = async (): Promise<void> => {
-    await window.api.consoleDisconnect();
-    refresh();
-  };
-
-  const syncNow = async (): Promise<void> => {
-    setBusy(true);
-    await window.api.consoleSyncNow();
-    setBusy(false);
-    refresh();
-  };
-
   return (
     <motion.div
       className="rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 p-6"
       initial={{ opacity: 0, filter: 'blur(10px)' }}
       animate={{ opacity: 1, filter: 'blur(0px)' }}
-      transition={{ duration: 0.6, delay: 0.4 }}
+      transition={{ duration: 0.6, delay: 0.14 }}
     >
-      <h3 className="text-white font-medium text-base mb-1">Fleet Console</h3>
-      <p className="text-neutral-500 text-sm mb-4">
-        Optionally enroll this device in an Off Grid Console for org policy, fleet audit, and remote
-        commands. The app stays fully local — this only adds reporting to a console you control.
-      </p>
-
-      {status?.enrolled ? (
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <span className="text-neutral-500">Device</span>
-            <span className="text-neutral-200 font-mono">{status.deviceId}</span>
-            <span className="text-neutral-500">Console</span>
-            <span className="text-neutral-200 truncate">{status.url}</span>
-            <span className="text-neutral-500">Policy version</span>
-            <span className="text-neutral-200">{status.policyVersion ?? '—'}</span>
-            <span className="text-neutral-500">Queued events</span>
-            <span className="text-neutral-200">{status.queued}</span>
-          </div>
-          {status.killed ? (
-            <p className="rounded-lg bg-red-950/50 border border-red-900 px-3 py-2 text-sm text-red-300">
-              Kill switch received from the console.
-            </p>
-          ) : null}
-          <div className="flex gap-2">
-            <button onClick={syncNow} disabled={busy} className={btnCls}>
-              {busy ? 'Syncing…' : 'Sync now'}
-            </button>
-            <button onClick={disconnect} className={btnCls}>
-              Disconnect
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="Console URL — e.g. https://console.yourorg.com"
-            className={inputCls}
-          />
-          <input
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="Enrollment token"
-            className={inputCls}
-          />
-          {error ? <p className="text-sm text-red-400">{error}</p> : null}
-          <button onClick={connect} disabled={busy || !url || !token} className={btnCls}>
-            {busy ? 'Enrolling…' : 'Connect'}
+      <h3 className="text-white font-medium text-base mb-1">Resource usage</h3>
+      <p className="text-neutral-500 text-sm mb-4">How much of your Mac the local AI may use. Higher modes allow longer context and bigger models; a safety cap always prevents memory overcommit.</p>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {PERF_MODES.map((m) => (
+          <button
+            key={m.id}
+            onClick={() => pick(m.id)}
+            aria-pressed={mode === m.id}
+            className={`rounded-md border p-3 text-left transition-colors ${mode === m.id ? 'border-green-500 bg-green-500/5' : 'border-neutral-800 hover:border-neutral-700'}`}
+          >
+            <div className={`text-sm ${mode === m.id ? 'text-green-500' : 'text-neutral-200'}`}>{m.label}</div>
+            <div className="mt-1 text-[11px] leading-snug text-neutral-500">{m.desc}</div>
           </button>
-        </div>
-      )}
+        ))}
+      </div>
     </motion.div>
   );
 }
@@ -295,6 +237,28 @@ export function Settings() {
             </div>
           </motion.div>
 
+          {/* Setup & health — available in every build. Re-run setup or check
+              what's running at any time. */}
+          <motion.div
+            className="rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 p-6"
+            initial={{ opacity: 0, filter: 'blur(10px)' }}
+            animate={{ opacity: 1, filter: 'blur(0px)' }}
+            transition={{ duration: 0.6, delay: 0.13 }}
+          >
+            <h3 className="text-white font-medium text-base mb-1">Setup &amp; health</h3>
+            <p className="text-neutral-500 text-sm mb-4">
+              Set up your local AI in one click, or browse models yourself. The status of every
+              on-device component is shown live below.
+            </p>
+            <SetupPanel />
+            <div className="mt-4">
+              <StoragePanel />
+            </div>
+          </motion.div>
+
+          {/* Resource usage — Conservative / Balanced / Extreme */}
+          <ResourceModeSection />
+
           {/* Identity — who you are (Pro: foundation for the act pillar) */}
           {isPro ? (
             <motion.div
@@ -319,7 +283,20 @@ export function Settings() {
           {/* Pro sections — shown but disabled in the free build. */}
           {isPro ? <ProactiveSection /> : <ProPlaceholder title="Proactive delivery" description="A morning briefing and a heads-up before each meeting — native notifications, even when the window is closed." />}
           {isPro ? <SecretaryPrefs /> : <ProPlaceholder title="What Off Grid has learned" description="Preferences distilled from the suggestions you dismiss, fed back to your assistant so it gets sharper over time." />}
-          {isPro ? <ConsoleSection /> : <ProPlaceholder title="Fleet Console" description="Optionally enroll this device in an Off Grid Console for org policy, fleet audit, and remote commands — fully local." />}
+
+          {/* Data & privacy — one place to delete on-device data. */}
+          <motion.div
+            className="rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 p-6"
+            initial={{ opacity: 0, filter: 'blur(10px)' }}
+            animate={{ opacity: 1, filter: 'blur(0px)' }}
+            transition={{ duration: 0.6, delay: 0.42 }}
+          >
+            <h3 className="text-white font-medium text-base mb-1">Data &amp; privacy</h3>
+            <p className="text-neutral-500 text-sm mb-4">
+              Everything stays on this device. Delete any of it from here — per category, or all at once.
+            </p>
+            <DataPrivacyPanel />
+          </motion.div>
 
           {/* Version footer — so you always know which build you're on. */}
           <div className="flex items-center justify-center gap-2 pt-2 text-xs text-neutral-600">

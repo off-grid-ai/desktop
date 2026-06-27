@@ -4,11 +4,27 @@
 // app's captured memories — so a project's knowledge base spans both uploaded
 // files and what Off Grid has seen (the KB-sources decision).
 
+import crypto from 'crypto';
 import { getDB } from '../database';
+import { emitChange } from '../sync/bus';
 import type { VectorStore, ChunkCandidate } from '@offgrid/rag';
 import type { MediaKind, Project, RagDocument } from '@offgrid/rag';
 
 let migrated = false;
+
+// Whole-record emit helpers (read the row back so peers converge on full state).
+function emitProject(id: string): void {
+  const row = getDB()
+    .prepare('SELECT id, name, description, system_prompt, icon, include_memory, created_at, updated_at FROM projects WHERE id = ?')
+    .get(id) as Record<string, unknown> | undefined;
+  if (row) emitChange('project', id, 'put', row);
+}
+function emitThread(id: string): void {
+  const row = getDB()
+    .prepare('SELECT id, project_id, title, created_at, updated_at FROM project_threads WHERE id = ?')
+    .get(id) as Record<string, unknown> | undefined;
+  if (row) emitChange('project_thread', id, 'put', row);
+}
 
 function migrate(): void {
   if (migrated) return;
@@ -53,6 +69,7 @@ function migrate(): void {
     );
     CREATE TABLE IF NOT EXISTS project_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      uuid TEXT, -- stable, mesh-safe id for cross-device sync
       thread_id TEXT NOT NULL,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
@@ -215,6 +232,7 @@ export function createProject(p: {
   getDB()
     .prepare('INSERT INTO projects (id, name, description, system_prompt, icon) VALUES (?, ?, ?, ?, ?)')
     .run(p.id, p.name, p.description ?? '', p.systemPrompt ?? '', p.icon ?? null);
+  emitProject(p.id);
 }
 
 export function updateProject(
@@ -234,25 +252,36 @@ export function updateProject(
   sets.push("updated_at = datetime('now')");
   args.push(id);
   db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`).run(...args);
+  emitProject(id);
 }
 
 export function deleteProject(id: string): void {
   migrate();
   const db = getDB();
+  // Collect replicated ids before deletion so we can emit tombstones for the
+  // whole cascade (rag_documents/chunks are a local index — not replicated).
+  const threadIds = (db.prepare('SELECT id FROM project_threads WHERE project_id = ?').all(id) as { id: string }[]).map((t) => t.id);
+  const msgUuids = threadIds.length
+    ? (db
+        .prepare(`SELECT uuid FROM project_messages WHERE thread_id IN (${threadIds.map(() => '?').join(',')}) AND uuid IS NOT NULL`)
+        .all(...threadIds) as { uuid: string }[]).map((m) => m.uuid)
+    : [];
   const tx = db.transaction(() => {
     const docs = db.prepare('SELECT id FROM rag_documents WHERE project_id = ?').all(id) as { id: number }[];
     for (const d of docs) {
       db.prepare('DELETE FROM rag_chunks WHERE doc_id = ?').run(d.id);
     }
     db.prepare('DELETE FROM rag_documents WHERE project_id = ?').run(id);
-    const threads = db.prepare('SELECT id FROM project_threads WHERE project_id = ?').all(id) as { id: string }[];
-    for (const t of threads) {
-      db.prepare('DELETE FROM project_messages WHERE thread_id = ?').run(t.id);
+    for (const t of threadIds) {
+      db.prepare('DELETE FROM project_messages WHERE thread_id = ?').run(t);
     }
     db.prepare('DELETE FROM project_threads WHERE project_id = ?').run(id);
     db.prepare('DELETE FROM projects WHERE id = ?').run(id);
   });
   tx();
+  for (const u of msgUuids) emitChange('project_message', u, 'delete');
+  for (const t of threadIds) emitChange('project_thread', t, 'delete');
+  emitChange('project', id, 'delete');
 }
 
 export function listThreads(projectId: string): { id: string; title: string; updatedAt: string }[] {
@@ -266,21 +295,26 @@ export function listThreads(projectId: string): { id: string; title: string; upd
 export function createThread(id: string, projectId: string, title = 'New chat'): void {
   migrate();
   getDB().prepare('INSERT INTO project_threads (id, project_id, title) VALUES (?, ?, ?)').run(id, projectId, title);
+  emitThread(id);
 }
 
 export function renameThread(id: string, title: string): void {
   migrate();
   getDB().prepare("UPDATE project_threads SET title = ?, updated_at = datetime('now') WHERE id = ?").run(title, id);
+  emitThread(id);
 }
 
 export function deleteThread(id: string): void {
   migrate();
   const db = getDB();
+  const msgUuids = (db.prepare('SELECT uuid FROM project_messages WHERE thread_id = ? AND uuid IS NOT NULL').all(id) as { uuid: string }[]).map((m) => m.uuid);
   const tx = db.transaction(() => {
     db.prepare('DELETE FROM project_messages WHERE thread_id = ?').run(id);
     db.prepare('DELETE FROM project_threads WHERE id = ?').run(id);
   });
   tx();
+  for (const u of msgUuids) emitChange('project_message', u, 'delete');
+  emitChange('project_thread', id, 'delete');
 }
 
 export function getThreadMessages(threadId: string): { role: string; content: string }[] {
@@ -293,6 +327,12 @@ export function getThreadMessages(threadId: string): { role: string; content: st
 export function appendThreadMessage(threadId: string, role: string, content: string): void {
   migrate();
   const db = getDB();
-  db.prepare('INSERT INTO project_messages (thread_id, role, content) VALUES (?, ?, ?)').run(threadId, role, content);
+  const uuid = crypto.randomUUID();
+  db.prepare('INSERT INTO project_messages (uuid, thread_id, role, content) VALUES (?, ?, ?, ?)').run(uuid, threadId, role, content);
   db.prepare("UPDATE project_threads SET updated_at = datetime('now') WHERE id = ?").run(threadId);
+  const row = db
+    .prepare('SELECT uuid, thread_id, role, content, created_at FROM project_messages WHERE uuid = ?')
+    .get(uuid) as Record<string, unknown> | undefined;
+  if (row) emitChange('project_message', uuid, 'put', row);
+  emitThread(threadId);
 }

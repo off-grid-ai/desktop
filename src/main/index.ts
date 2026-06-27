@@ -1,7 +1,7 @@
-import { app, shell, BrowserWindow, protocol, net, session, desktopCapturer, screen } from 'electron'
+import { app, shell, BrowserWindow, protocol, session, desktopCapturer, screen } from 'electron'
 import { join } from 'path'
-import { pathToFileURL } from 'url'
 import fs from 'fs'
+import { Readable } from 'stream'
 
 // Custom scheme to serve local capture screenshots to the renderer (file:// is
 // blocked there). Registered before app 'ready'; handled after.
@@ -19,6 +19,8 @@ import { initLicensing } from './licensing/license-service'
 import { setupLicenseIpc } from './license-ipc'
 import { nativeImage } from 'electron'
 import { purgeLegacyChatImports } from './database'
+import { setupClipboard } from './clipboard'
+import { setupSync } from './sync'
 
 // Pin one canonical userData dir ("Off Grid AI Desktop") regardless of package
 // name, and migrate data from the legacy split dirs ("My Memories" had the
@@ -158,19 +160,57 @@ app.whenReady().then(() => {
   }
 
   // Serve local capture screenshots + entity photos + meeting videos to the
-  // renderer. Delegate to Electron's native file handler (net.fetch on a file://
-  // URL) — it implements HTTP range/seek for large media correctly, which the
-  // hand-rolled stream did not (long recordings would stall or jump to the end).
+  // renderer. We honor HTTP Range BY HAND: Electron's net.fetch on a file:// URL
+  // does NOT serve partial content (it returns the whole file as 200, with no
+  // Accept-Ranges), so <video> can't seek large recordings. A correct 206 with
+  // Content-Range is what makes the seek bar work on multi-hundred-MB meetings.
+  const OGCAPTURE_MIME: Record<string, string> = {
+    '.mp4': 'video/mp4',
+    '.mov': 'video/quicktime',
+    '.webm': 'video/webm',
+    '.m4a': 'audio/mp4',
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+  };
   protocol.handle('ogcapture', async (request) => {
     const p = decodeURIComponent(request.url.slice('ogcapture://'.length));
-    const range = request.headers.get('Range');
     try {
-      const fileUrl = pathToFileURL(p).toString();
-      const headers = new Headers();
-      if (range) headers.set('Range', range);
-      const resp = await net.fetch(fileUrl, { headers });
-      console.log(`[ogcapture] ${p.split('/').pop()} range=${range || '(full)'} -> ${resp.status} cr=${resp.headers.get('content-range') || '-'} ct=${resp.headers.get('content-type') || '-'} len=${resp.headers.get('content-length') || '-'}`);
-      return resp;
+      const size = (await fs.promises.stat(p)).size;
+      const dot = p.lastIndexOf('.');
+      const type = (dot >= 0 && OGCAPTURE_MIME[p.slice(dot).toLowerCase()]) || 'application/octet-stream';
+      const rangeHeader = request.headers.get('Range');
+      const m = rangeHeader ? /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim()) : null;
+      if (m) {
+        let start = m[1] ? parseInt(m[1], 10) : 0;
+        let end = m[2] ? parseInt(m[2], 10) : size - 1;
+        if (!Number.isFinite(start)) start = 0;
+        if (!Number.isFinite(end) || end >= size) end = size - 1;
+        if (start > end || start >= size) {
+          return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
+        }
+        const body = Readable.toWeb(fs.createReadStream(p, { start, end })) as unknown as ReadableStream;
+        return new Response(body, {
+          status: 206,
+          headers: {
+            'Content-Type': type,
+            'Content-Range': `bytes ${start}-${end}/${size}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': String(end - start + 1),
+          },
+        });
+      }
+      // No Range header → full file, but advertise range support so the player
+      // knows it may seek (it then re-requests with a Range header).
+      const body = Readable.toWeb(fs.createReadStream(p)) as unknown as ReadableStream;
+      return new Response(body, {
+        status: 200,
+        headers: { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': String(size) },
+      });
     } catch (e) {
       console.error('[ogcapture] serve failed for', p, e);
       return new Response(null, { status: 404 });
@@ -250,6 +290,8 @@ app.whenReady().then(() => {
      setupRagIPC();
      setupMcpIpc(); // basic MCP connectors (management + chat tool extension)
      startModelServer(); // one OpenAI-compatible local gateway on :7878 (LLM + STT)
+     setupClipboard(); // local clipboard history + global-hotkey quick-paste popup
+     void setupSync(); // cross-device mesh: mDNS discovery + license-seeded auto-pairing (Pro)
      // Pro features (capture, CRM, meetings, connectors, secretary, proactive,
      // skills engine, console, tray) register their own IPC + intervals + watchers
      // here. No-op in the free build (the pro submodule is absent → stub).

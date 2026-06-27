@@ -8,6 +8,10 @@ import {
   IconCheck,
   IconX,
   IconTrash,
+  IconUpload,
+  IconInfoCircle,
+  IconExternalLink,
+  IconEye,
 } from '@tabler/icons-react';
 import {
   filterAndSort,
@@ -117,7 +121,23 @@ interface ModelEntry {
   imageModes?: string[];
   tags?: string[];
   releaseDate?: string;
+  quant?: string;
 }
+
+// Use-case guidance for chat models. Client-side (no catalog schema change): each
+// maps to a one-line blurb + a heuristic filter so people can find a model suited
+// to coding / legal / medical / vision / etc.
+interface UseCase { id: string; label: string; blurb: string; match: (m: { params?: number; kind?: string }) => boolean }
+const USE_CASES: UseCase[] = [
+  { id: 'all', label: 'All', blurb: '', match: () => true },
+  { id: 'general', label: 'General chat', blurb: 'Everyday questions, drafting, and brainstorming.', match: () => true },
+  { id: 'coding', label: 'Coding', blurb: 'Code generation and debugging — larger models reason better over code.', match: (m) => (m.params ?? 0) >= 4 },
+  { id: 'writing', label: 'Writing', blurb: 'Long-form drafting and editing — long context helps.', match: (m) => (m.params ?? 0) >= 2 },
+  { id: 'legal', label: 'Legal & long docs', blurb: 'Dense documents and careful reasoning — favor larger models. On-device, so nothing leaves your machine.', match: (m) => (m.params ?? 0) >= 7 },
+  { id: 'medical', label: 'Medical', blurb: 'Careful reasoning over clinical text — kept fully private on-device. Not a substitute for professional medical advice.', match: (m) => (m.params ?? 0) >= 7 },
+  { id: 'vision', label: 'Vision', blurb: 'Understand images, screenshots, and documents.', match: (m) => m.kind === 'vision' },
+  { id: 'lightweight', label: 'Lightweight', blurb: 'Fast and low-memory for modest machines.', match: (m) => (m.params ?? 0) <= 4 },
+];
 
 // "Mar 2026" from an ISO date; '' if absent/unparseable.
 function fmtReleaseDate(iso?: string): string {
@@ -159,8 +179,31 @@ export function ModelsScreen() {
   const [activeModel, setActiveModel] = useState<string | null>(null);
   const [switching, setSwitching] = useState<string | null>(null);
   const [switchError, setSwitchError] = useState<string | null>(null);
+  const [ramGb, setRamGb] = useState<number | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [useCase, setUseCase] = useState('all');
+  const [detail, setDetail] = useState<ModelEntry | null>(null);
+
+  const importModel = async (): Promise<void> => {
+    if (importing) return;
+    setImporting(true);
+    try {
+      const res = await api.importLocalModel?.();
+      if (res?.success) {
+        const c = await api.getModelCatalog?.();
+        if (c) { setKinds(c.kinds); setModels(c.models); }
+        setInstalled(await api.getInstalledModels?.());
+        setActiveKind('text');
+      } else if (res && !res.canceled && res.error) {
+        window.alert(`Import failed: ${res.error}`);
+      }
+    } finally {
+      setImporting(false);
+    }
+  };
 
   useEffect(() => {
+    api.systemHealth?.().then((h: { ramGb?: number }) => setRamGb(h?.ramGb ?? null)).catch(() => {});
     api.getModelCatalog?.().then((c: { kinds: string[]; models: ModelEntry[] }) => {
       setKinds(c.kinds);
       setModels(c.models);
@@ -208,6 +251,14 @@ export function ModelsScreen() {
 
   const useModel = async (id: string): Promise<void> => {
     if (switching) return;
+    // Pre-activate RAM check: warn before loading a model that's large for this Mac.
+    try {
+      const fit = await api.estimateModelFit?.(id);
+      if (fit && fit.level !== 'ok') {
+        const ok = window.confirm(`${fit.message}\n\nLoad it anyway?`);
+        if (!ok) return;
+      }
+    } catch { /* estimate is best-effort — proceed */ }
     setSwitchError(null);
     setSwitching(id);
     try {
@@ -291,6 +342,8 @@ export function ModelsScreen() {
     filterState
   )
     .filter((m) => sizeBucket == null || totalBytes(m) <= sizeBucket * 1e9)
+    // Use-case filter (chat models only) — coding/legal/medical/vision/etc.
+    .filter((m) => activeKind !== 'text' || (USE_CASES.find((u) => u.id === useCase)?.match(m) ?? true))
     // Featuring order: Off Grid's flagship photoreal/versatile builds first, then
     // the rest of the Off Grid builds, then everyone else. Stable sort preserves
     // catalog order within each tier.
@@ -300,14 +353,30 @@ export function ModelsScreen() {
 
   return (
     <div className="h-full overflow-y-auto px-8 py-6 font-mono">
-      <h1 className="text-2xl font-light tracking-tight text-white">Models</h1>
+      <div className="flex items-start justify-between gap-4">
+        <h1 className="text-2xl font-light tracking-tight text-white">Models</h1>
+        <button
+          onClick={importModel}
+          disabled={importing}
+          className="flex shrink-0 items-center gap-1.5 rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 transition-colors hover:border-green-500 hover:text-green-500 disabled:opacity-50"
+        >
+          {importing ? <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> : <IconUpload className="h-3.5 w-3.5" />}
+          {importing ? 'Importing…' : 'Import .gguf'}
+        </button>
+      </div>
       <p className="mt-1 text-sm text-neutral-500">
-        Download models for any capability. Everything runs locally on your device.
+        Download models for any capability, or import your own .gguf. Everything runs locally on your device.
       </p>
+      {ramGb && (
+        <p className="mt-1 text-xs text-neutral-600">
+          Your Mac has {ramGb} GB RAM — models up to ~{Math.round(ramGb * 0.38)} GB load with comfortable headroom.
+        </p>
+      )}
 
-      {/* Modality tabs — always visible; they also scope the search below. */}
+      {/* Modality tabs. Vision is merged into Text (vision models also do text and
+          carry a "Vision" badge), so the standalone Vision tab is hidden. */}
       <div className="mt-5 flex gap-2 border-b border-neutral-800 pb-px">
-        {kinds.map((k) => (
+        {kinds.filter((k) => k !== 'vision').map((k) => (
           <button
             key={k}
             onClick={() => setActiveKind(k)}
@@ -321,6 +390,29 @@ export function ModelsScreen() {
           </button>
         ))}
       </div>
+
+      {/* Use-case chips (chat models only): coding / legal / medical / vision / … */}
+      {activeKind === 'text' && !searchingMode && (
+        <div className="mt-4">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-[10px] uppercase tracking-widest text-neutral-600">For</span>
+            {USE_CASES.filter((u) => u.id !== 'all').map((u) => (
+              <button
+                key={u.id}
+                onClick={() => setUseCase((cur) => (cur === u.id ? 'all' : u.id))}
+                className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+                  useCase === u.id ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-400 hover:border-neutral-700'
+                }`}
+              >
+                {u.label}
+              </button>
+            ))}
+          </div>
+          {useCase !== 'all' && (
+            <p className="mt-2 text-xs text-neutral-500">{USE_CASES.find((u) => u.id === useCase)?.blurb}</p>
+          )}
+        </div>
+      )}
 
       {/* Hugging Face search — text/vision/image only (those run arbitrary HF
           repos). STT/TTS are curated, since most HF ASR/TTS repos are formats our
@@ -479,12 +571,30 @@ export function ModelsScreen() {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="truncate text-sm text-white">{m.name}</span>
+                    <button
+                      onClick={() => setDetail(m)}
+                      className="truncate text-left text-sm text-white transition-colors hover:text-green-500"
+                      title="View details"
+                    >
+                      {m.name}
+                    </button>
+                    {m.kind === 'vision' && (
+                      <span className="flex items-center gap-0.5 rounded-sm border border-green-500 px-1 text-[9px] uppercase tracking-wide text-green-500">
+                        <IconEye className="h-2.5 w-2.5" /> Vision
+                      </span>
+                    )}
                     {m.isNew && (
                       <span className="rounded-sm border border-green-500 px-1 text-[9px] uppercase tracking-wide text-green-500">
                         New
                       </span>
                     )}
+                    <button
+                      onClick={() => setDetail(m)}
+                      aria-label={`About ${m.name}`}
+                      className="text-neutral-600 transition-colors hover:text-neutral-300"
+                    >
+                      <IconInfoCircle className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                   <div className="mt-0.5 text-[10px] uppercase tracking-wide text-neutral-600">
                     {(() => {
@@ -494,6 +604,23 @@ export function ModelsScreen() {
                       return [m.org, m.params ? `${m.params}B` : null, size, released].filter(Boolean).join('  ·  ');
                     })()}
                   </div>
+                  {(() => {
+                    // RAM-fit guide vs this Mac (weights only; KV cache is extra). Only
+                    // flag tight/risky so the catalog stays uncluttered. Mirrors the
+                    // backend thresholds (≤38% comfy, ≤55% tight, else risky).
+                    if (!ramGb) return null;
+                    const wGb = (m.files || []).reduce((s, f) => s + (f.sizeBytes || 0), 0) / 1e9;
+                    if (!wGb) return null;
+                    const level = wGb <= ramGb * 0.38 ? 'ok' : wGb <= ramGb * 0.55 ? 'tight' : 'risky';
+                    if (level === 'ok') return null;
+                    return (
+                      <div className="mt-1.5">
+                        <span className={`rounded-sm px-1.5 py-0.5 text-[9px] uppercase tracking-wide ${level === 'tight' ? 'border border-amber-400 text-amber-400' : 'border border-amber-400 bg-amber-400/10 text-amber-400'}`}>
+                          {level === 'tight' ? 'Tight on RAM' : 'May not fit'}
+                        </span>
+                      </div>
+                    );
+                  })()}
                   {m.tags && m.tags.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1">
                       {m.tags.map((t) => (
@@ -587,6 +714,95 @@ export function ModelsScreen() {
       </div>
         </>
       )}
+
+      {/* Model detail — slide-over with full info + Hugging Face link (master-detail). */}
+      {detail && (() => {
+        const m = detail;
+        const isLocal = m.id.startsWith('local:');
+        const hfUrl = !isLocal && m.id.includes('/') ? `https://huggingface.co/${m.id}` : null;
+        const bytes = (m.files || []).reduce((s, f) => s + (f.sizeBytes || 0), 0);
+        const isInstalled = installed.includes(m.id);
+        const isActive = activeModel === m.id;
+        const prog = progress[m.id];
+        const downloading = prog && prog.status !== 'completed' && prog.status !== 'failed';
+        const rows: [string, string | null][] = [
+          ['Source', m.org || (isLocal ? 'Imported' : '—')],
+          ['Parameters', m.params ? `${m.params}B` : null],
+          ['Quantization', m.quant || null],
+          ['Download size', bytes > 0 ? `${(bytes / 1e9).toFixed(1)} GB` : null],
+          ['Released', fmtReleaseDate(m.releaseDate) || null],
+          ['Min RAM', m.minRamGb ? `${m.minRamGb} GB` : null],
+        ];
+        return (
+          <div className="fixed inset-0 z-50 flex justify-end">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setDetail(null)} />
+            <div className="relative z-10 flex h-full w-[28vw] min-w-[400px] flex-col border-l border-neutral-800 bg-neutral-950 font-mono">
+              <div className="flex items-start justify-between gap-3 border-b border-neutral-800 px-5 py-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h2 className="truncate text-base text-white">{m.name}</h2>
+                    {m.kind === 'vision' && (
+                      <span className="flex items-center gap-0.5 rounded-sm border border-green-500 px-1 text-[9px] uppercase tracking-wide text-green-500">
+                        <IconEye className="h-2.5 w-2.5" /> Vision
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 truncate text-[10px] text-neutral-600">{m.id}</div>
+                </div>
+                <button onClick={() => setDetail(null)} aria-label="Close" className="rounded-md border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 transition-colors hover:text-white">
+                  Close
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                {m.description && <p className="text-sm leading-relaxed text-neutral-300">{m.description}</p>}
+                <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2.5">
+                  {rows.filter(([, v]) => v).map(([k, v]) => (
+                    <div key={k}>
+                      <dt className="text-[10px] uppercase tracking-wide text-neutral-600">{k}</dt>
+                      <dd className="text-sm text-neutral-200">{v}</dd>
+                    </div>
+                  ))}
+                </dl>
+                {ramGb && bytes > 0 && (
+                  <p className="mt-4 text-xs text-neutral-500">
+                    {bytes / 1e9 <= ramGb * 0.38
+                      ? 'Loads with comfortable headroom on your Mac.'
+                      : bytes / 1e9 <= ramGb * 0.55
+                        ? 'Will run on your Mac, but tight on RAM — context will be reduced to stay safe.'
+                        : 'Large for your Mac — may run slowly or need a smaller resource mode.'}
+                  </p>
+                )}
+                {hfUrl && (
+                  <button
+                    onClick={() => (window as { api?: { openExternal?: (u: string) => void } }).api?.openExternal?.(hfUrl)}
+                    className="mt-4 flex items-center gap-1.5 text-xs text-green-500 transition-colors hover:text-green-400"
+                  >
+                    <IconExternalLink className="h-3.5 w-3.5" /> View on Hugging Face
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 border-t border-neutral-800 px-5 py-4">
+                {isActive ? (
+                  <span className="flex items-center gap-1 text-sm text-green-500"><IconCircleCheck className="h-4 w-4" /> Active</span>
+                ) : isInstalled ? (
+                  <>
+                    {(m.kind === 'text' || m.kind === 'vision') && (
+                      <button onClick={() => { useModel(m.id); setDetail(null); }} disabled={!!switching} className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-white transition-colors hover:border-green-500 hover:text-green-500 disabled:opacity-50">Use</button>
+                    )}
+                    <button onClick={() => { removeModel(m.id, m.name); setDetail(null); }} className="rounded-md border border-neutral-800 px-3 py-1.5 text-xs text-neutral-400 transition-colors hover:border-red-500 hover:text-red-400">Delete</button>
+                  </>
+                ) : downloading ? (
+                  <span className="text-sm text-neutral-400">Downloading {prog.percent}%…</span>
+                ) : (
+                  <button onClick={() => download(m.id)} className="flex items-center gap-1 rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-white transition-colors hover:border-green-500 hover:text-green-500"><IconDownload className="h-4 w-4" /> Download</button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { ModelsScreen } from './components/ModelsScreen';
 import { ProjectsScreen } from './components/ProjectsScreen';
 import { ConnectorsScreen } from './components/ConnectorsScreen';
 import { GatewayScreen } from './components/GatewayScreen';
+import { ClipboardScreen } from './components/ClipboardScreen';
 import { Onboarding } from './components/Onboarding';
 import { PermissionGate } from './components/PermissionGate';
 import type { SearchHit } from './types';
@@ -38,11 +39,12 @@ import {
   IconLayoutSidebarLeftExpand,
   IconLoader2,
   IconArrowLeft,
-  IconArrowRight
+  IconArrowRight,
+  IconClipboard
 } from '@tabler/icons-react';
 import { cn } from './lib/utils';
 
-type ViewMode = 'dashboard' | 'day' | 'replay' | 'reflect' | 'actions' | 'connectors' | 'meetings' | 'chats' | 'memories' | 'entities' | 'graph' | 'memory-chat' | 'models' | 'gateway' | 'projects' | 'notifications' | 'settings' | 'search';
+type ViewMode = 'dashboard' | 'day' | 'replay' | 'reflect' | 'actions' | 'connectors' | 'meetings' | 'chats' | 'memories' | 'entities' | 'graph' | 'memory-chat' | 'models' | 'gateway' | 'projects' | 'notifications' | 'settings' | 'search' | 'clipboard';
 
 // Navigation state type for history tracking
 interface NavigationState {
@@ -237,7 +239,8 @@ function AppContent() {
       'projects': '/projects',
       'notifications': '/notifications',
       'search': '/search',
-      'settings': '/settings'
+      'settings': '/settings',
+      'clipboard': '/clipboard'
     };
 
     const newPath = urlMap[viewMode];
@@ -444,6 +447,7 @@ function AppContent() {
     proItem('entities'),
     { label: 'Projects', icon: <IconFolders className="h-5 w-5 shrink-0" />, view: 'projects' as ViewMode },
     { label: 'Chat', icon: <IconMessageCircle className="h-5 w-5 shrink-0" />, view: 'memory-chat' as ViewMode },
+    { label: 'Clipboard', icon: <IconClipboard className="h-5 w-5 shrink-0" />, view: 'clipboard' as ViewMode },
     { label: 'Integrations', icon: <IconPlug className="h-5 w-5 shrink-0" />, view: 'connectors' as ViewMode },
     { label: 'Models', icon: <IconDownload className="h-5 w-5 shrink-0" />, view: 'models' as ViewMode },
     { label: 'Gateway', icon: <IconServer2 className="h-5 w-5 shrink-0" />, view: 'gateway' as ViewMode },
@@ -634,6 +638,8 @@ function AppContent() {
                     <GatewayScreen />
                   ) : viewMode === 'settings' ? (
                     <Settings />
+                  ) : viewMode === 'clipboard' ? (
+                    <ClipboardScreen />
                   ) : (
                     // Pro tabs: render through the pro view-router when active,
                     // otherwise show the upgrade writeup for that feature.

@@ -35,6 +35,38 @@ try {
       return () => ipcRenderer.removeListener(channel, sub);
     },
     proOff: (channel: string) => ipcRenderer.removeAllListeners(channel),
+    // Clipboard manager (local history + quick-paste popup).
+    clipboard: {
+      list: (limit?: number) => ipcRenderer.invoke('clipboard:list', limit),
+      search: (query: string) => ipcRenderer.invoke('clipboard:search', query),
+      getImage: (id: string) => ipcRenderer.invoke('clipboard:get-image', id),
+      restore: (id: string) => ipcRenderer.invoke('clipboard:restore', id),
+      paste: (id: string) => ipcRenderer.invoke('clipboard:paste', id),
+      remove: (id: string) => ipcRenderer.invoke('clipboard:delete', id),
+      clear: () => ipcRenderer.invoke('clipboard:clear'),
+      count: () => ipcRenderer.invoke('clipboard:count'),
+      hidePopup: () => ipcRenderer.invoke('clipboard:hide-popup'),
+      onChanged: (cb: () => void) => {
+        const sub = (): void => cb();
+        ipcRenderer.on('clipboard:changed', sub);
+        return () => ipcRenderer.removeListener('clipboard:changed', sub);
+      },
+      onPopupOpened: (cb: () => void) => {
+        const sub = (): void => cb();
+        ipcRenderer.on('clipboard:popup-opened', sub);
+        return () => ipcRenderer.removeListener('clipboard:popup-opened', sub);
+      },
+    },
+    // Cross-device mesh status (Phase A: discovery + pairing).
+    sync: {
+      status: () => ipcRenderer.invoke('sync:status'),
+      forget: (deviceId: string) => ipcRenderer.invoke('sync:forget', deviceId),
+      onChanged: (cb: () => void) => {
+        const sub = (): void => cb();
+        ipcRenderer.on('sync:changed', sub);
+        return () => ipcRenderer.removeListener('sync:changed', sub);
+      },
+    },
     getMemories: (limit: number, appName?: string) => ipcRenderer.invoke('db:get-memories', limit, appName),
     addMemory: (content: string, source?: string) => ipcRenderer.invoke('db:add-memory', content, source),
     searchMemories: (query: string) => ipcRenderer.invoke('db:search-memories', query),
@@ -148,6 +180,7 @@ try {
     openAccessibilitySettings: () => ipcRenderer.invoke('permissions:open-accessibility-settings'),
     openScreenRecordingSettings: () => ipcRenderer.invoke('permissions:open-screen-recording-settings'),
     getAppVersion: () => ipcRenderer.invoke('app:version'),
+    openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url),
 
     // Model Download APIs
     checkModelStatus: () => ipcRenderer.invoke('model:check-status'),
@@ -173,6 +206,29 @@ try {
       const subscription = (_: any, data: any) => callback(data)
       ipcRenderer.on('model:download-progress', subscription)
       return () => ipcRenderer.removeListener('model:download-progress', subscription)
+    },
+
+    // Setup + system health
+    systemHealth: () => ipcRenderer.invoke('system:health'),
+    autoConfigure: () => ipcRenderer.invoke('setup:auto-configure'),
+    restartComponent: (id: string) => ipcRenderer.invoke('system:restart', id),
+    estimateModelFit: (modelId: string) => ipcRenderer.invoke('system:estimate-fit', modelId),
+
+    // Storage + download manager
+    getStorageInfo: () => ipcRenderer.invoke('models:storage'),
+    deleteOrphans: () => ipcRenderer.invoke('models:delete-orphans'),
+    listDownloads: () => ipcRenderer.invoke('models:downloads'),
+    retryDownload: (modelId: string) => ipcRenderer.invoke('models:retry-download', modelId),
+    importLocalModel: () => ipcRenderer.invoke('models:import'),
+
+    // Data & privacy
+    getDataSummary: () => ipcRenderer.invoke('data:summary'),
+    clearDataCategory: (id: string, olderThanDays?: number) => ipcRenderer.invoke('data:clear', id, olderThanDays),
+    deleteAllData: () => ipcRenderer.invoke('data:delete-all'),
+    onSetupProgress: (callback: (data: any) => void) => {
+      const subscription = (_: any, data: any) => callback(data)
+      ipcRenderer.on('setup:progress', subscription)
+      return () => ipcRenderer.removeListener('setup:progress', subscription)
     },
 
     // --- Agentic tool-calling (built-in tools) ---
