@@ -9,7 +9,6 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import { ClipboardPopup } from './components/ClipboardPopup'
-import { ThemeToggle } from './components/ThemeToggle'
 import { TooltipProvider } from './components/ui/tooltip'
 
 // The global-hotkey quick-paste popup loads this same renderer with #clip-popup,
@@ -23,7 +22,6 @@ createRoot(document.getElementById('root')!).render(
       <ClipboardPopup />
     ) : (
       <TooltipProvider delayDuration={300}>
-        <ThemeToggle />
         <App />
       </TooltipProvider>
     )}

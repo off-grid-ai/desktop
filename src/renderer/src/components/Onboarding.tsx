@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence, stagger, useAnimate } from 'motion/react';
 import { LampContainer } from './ui/lamp';
 import { OrbitingCircles } from './ui/orbiting-circles';
-import { StarsBackground } from './ui/stars-background';
+import { GridBackdrop } from './ui/grid-backdrop';
 import { BorderBeam } from './ui/border-beam';
 import { cn } from '@renderer/lib/utils';
 import logo from '@/assets/logo.png';
@@ -116,7 +116,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         {/* Step 1 — One app, every model, all local */}
         {currentStep === 1 && (
           <motion.div key="step-1" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="relative h-full w-full bg-neutral-950">
-            <StarsBackground className="absolute inset-0 opacity-30" starDensity={0.0002} />
+            <GridBackdrop className="opacity-70" />
             <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6">
               <div className="mb-6 text-center">
                 <TextGenerate words="One app. Every model. On your Mac." className="text-3xl font-semibold tracking-tight text-white md:text-5xl" delay={0} />
@@ -162,7 +162,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         {/* Step 2 — Private + grows with you */}
         {currentStep === 2 && (
           <motion.div key="step-2" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="relative flex h-full w-full flex-col items-center justify-center bg-neutral-950 px-6">
-            <StarsBackground className="absolute inset-0 opacity-20" starDensity={0.0002} />
+            <GridBackdrop className="opacity-70" />
             <div className="relative z-10 mx-auto max-w-4xl">
               <div className="mb-14 text-center">
                 <TextGenerate words="Yours, and only yours." className="text-3xl font-semibold tracking-tight text-white md:text-4xl" delay={0} />
