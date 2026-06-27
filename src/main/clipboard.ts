@@ -6,6 +6,8 @@
 
 import { app, clipboard, nativeImage, globalShortcut, BrowserWindow, ipcMain, screen } from 'electron';
 import { join } from 'path';
+import { pathToFileURL } from 'url';
+import fs from 'fs';
 import crypto from 'crypto';
 import { execFile } from 'child_process';
 import { is } from '@electron-toolkit/utils';
@@ -53,6 +55,7 @@ function getPopup(): BrowserWindow {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
       contextIsolation: true,
+      plugins: true, // Chromium's built-in PDF viewer needs the plugin enabled
     },
   });
   popup.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -95,6 +98,28 @@ function restore(id: string): boolean {
   if (!store || !bridge) return false;
   const item = store.get(id);
   if (!item) return false;
+  // A copied image FILE stores its bytes but bridge.write would put only the
+  // filename TEXT on the clipboard (file clips fall to the text path). Restore it
+  // as real image DATA so it pastes as an image, not the filename.
+  if (item.contentType === 'file' && item.rawData?.length && /\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i.test(item.textContent || '')) {
+    try {
+      const img = nativeImage.createFromBuffer(Buffer.from(item.rawData));
+      if (!img.isEmpty()) { clipboard.writeImage(img); return true; }
+    } catch { /* fall through to the normal bridge write */ }
+  }
+  // Other files (PDF/DOCX/…): write the bytes back to disk and put a real FILE URL
+  // on the clipboard, so pasting attaches the file instead of its name. (bridge.write
+  // would otherwise write only the filename text.)
+  if (item.contentType === 'file' && item.rawData?.length) {
+    try {
+      const dir = join(app.getPath('userData'), 'clip-files');
+      fs.mkdirSync(dir, { recursive: true });
+      const fp = join(dir, item.textContent || `clip-${id}`);
+      fs.writeFileSync(fp, Buffer.from(item.rawData));
+      clipboard.writeBuffer('public.file-url', Buffer.from(pathToFileURL(fp).href, 'utf8'));
+      return true;
+    } catch { /* fall through to the normal bridge write */ }
+  }
   bridge.write(item);
   return true;
 }
@@ -124,11 +149,37 @@ function registerIpc(): void {
     return fuzzySearch(items, q);
   });
 
-  // Full-resolution image as a data URL, for previewing an image item.
+  // Full-resolution image as a data URL, for previewing. Serves both pixel-data
+  // image clips AND copied image FILES (a file clip stores the full file bytes).
   ipcMain.handle('clipboard:get-image', (_e, id: string) => {
     const item = store?.get(id);
-    if (!item || item.contentType !== 'image' || !item.rawData.length) return null;
-    return `data:image/png;base64,${Buffer.from(item.rawData).toString('base64')}`;
+    if (!item || !item.rawData.length) return null;
+    if (item.contentType === 'image') return `data:image/png;base64,${Buffer.from(item.rawData).toString('base64')}`;
+    if (item.contentType === 'file') {
+      const m = /\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i.exec(item.textContent || '');
+      if (m) { const ext = m[1].toLowerCase() === 'jpg' ? 'jpeg' : m[1].toLowerCase(); return `data:image/${ext};base64,${Buffer.from(item.rawData).toString('base64')}`; }
+    }
+    return null;
+  });
+
+  // Raw file bytes as a data URL (PDF for now), so the preview can render the actual
+  // document in Chromium's built-in viewer instead of dumping parsed text.
+  ipcMain.handle('clipboard:file-data-url', (_e, id: string) => {
+    const item = store?.get(id);
+    if (!item || item.contentType !== 'file' || !item.rawData.length) return null;
+    if (/\.pdf$/i.test(item.textContent || '')) return `data:application/pdf;base64,${Buffer.from(item.rawData).toString('base64')}`;
+    return null;
+  });
+
+  // Extracted text for a file clip (PDF/DOCX/text), for the popup preview pane.
+  ipcMain.handle('clipboard:file-text', async (_e, id: string) => {
+    const item = store?.get(id);
+    if (!item || item.contentType !== 'file' || !item.rawData.length) return null;
+    try {
+      const { processUpload } = await import('./files');
+      const r = await processUpload(item.textContent || 'file', item.rawData);
+      return (r.text || '').slice(0, 8000) || null;
+    } catch { return null; }
   });
 
   ipcMain.handle('clipboard:restore', (_e, id: string) => restore(id));

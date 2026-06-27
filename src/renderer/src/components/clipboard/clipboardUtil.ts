@@ -17,12 +17,32 @@ export interface SearchResult {
   matches: Array<[number, number]>;
 }
 
+/** Convert a data: URL to a blob: URL. Chromium's built-in PDF viewer renders blob
+ *  URLs in an <iframe> but NOT data: URLs — hence this. Caller should revokeObjectURL. */
+export function dataUrlToBlobUrl(dataUrl: string): string {
+  const comma = dataUrl.indexOf(',');
+  const mime = /data:(.*?)(;base64)?,/.exec(dataUrl)?.[1] || 'application/octet-stream';
+  const bin = atob(dataUrl.slice(comma + 1));
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return URL.createObjectURL(new Blob([arr], { type: mime }));
+}
+
+/** A clip that can be shown as an image: pixel-data image clips, or copied image FILES. */
+export function isImageClip(it: { contentType: ContentType; textContent?: string | null; preview?: string }): boolean {
+  if (it.contentType === 'image') return true;
+  if (it.contentType === 'file') return /\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i.test(it.textContent || it.preview || '');
+  return false;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const clip = () => (window as any).api?.clipboard as
   | {
       list: (limit?: number) => Promise<ClipItem[]>;
       search: (query: string) => Promise<SearchResult[]>;
       getImage: (id: string) => Promise<string | null>;
+      fileText: (id: string) => Promise<string | null>;
+      fileDataUrl: (id: string) => Promise<string | null>;
       restore: (id: string) => Promise<boolean>;
       paste: (id: string) => Promise<boolean>;
       remove: (id: string) => Promise<void>;
