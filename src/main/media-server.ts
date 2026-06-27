@@ -31,7 +31,20 @@ const MEDIA_PORT = 7879;
 let server: http.Server | null = null;
 let token = '';
 let port = 0;
+let listening = false;
+// Canonical (symlink-resolved) allowed roots — comparing canonical-to-canonical is
+// what makes the allowlist symlink-proof (a link inside userData pointing elsewhere
+// resolves to its real target and fails the check).
 let allowedRoots: string[] = [];
+
+/** Resolve symlinks + `..` to a canonical absolute path; null if it can't (e.g. missing). */
+function canonical(p: string): string | null {
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    return null;
+  }
+}
 
 function serveFile(req: http.IncomingMessage, res: http.ServerResponse, filePath: string): void {
   let stat: fs.Stats;
@@ -82,7 +95,9 @@ function serveFile(req: http.IncomingMessage, res: http.ServerResponse, filePath
 export function startMediaServer(): void {
   if (server) return;
   token = randomUUID().replace(/-/g, '');
-  allowedRoots = [path.resolve(app.getPath('userData'))];
+  // Canonicalize the root once at startup so symlink-resolved request paths can be
+  // compared against it (fall back to a plain resolve if realpath fails).
+  allowedRoots = [canonical(app.getPath('userData')) ?? path.resolve(app.getPath('userData'))];
 
   server = http.createServer((req, res) => {
     const url = req.url || '/';
@@ -100,16 +115,28 @@ export function startMediaServer(): void {
       res.writeHead(400).end();
       return;
     }
-    if (!isPathAllowed(filePath, allowedRoots)) {
-      res.writeHead(403).end();
+    // Resolve symlinks on the actual file before the allowlist check, so a link
+    // inside userData can't smuggle a path outside it past the guard.
+    const real = canonical(filePath);
+    if (!real || !isPathAllowed(real, allowedRoots)) {
+      res.writeHead(real ? 403 : 404).end();
       return;
     }
-    serveFile(req, res, filePath);
+    serveFile(req, res, real);
   });
 
-  server.on('error', (e) => console.error('[media-server]', e));
+  server.on('error', (e) => {
+    console.error('[media-server]', e);
+    // A listen failure (e.g. EADDRINUSE) must NOT wedge the singleton: reset so a
+    // later startMediaServer() can retry instead of being blocked by `if (server)`.
+    if (!listening) {
+      server = null;
+      port = 0;
+    }
+  });
   // Loopback ONLY — never the LAN. Fixed port so the renderer CSP can allowlist it.
   server.listen(MEDIA_PORT, '127.0.0.1', () => {
+    listening = true;
     port = MEDIA_PORT;
     console.log(`[media-server] loopback media at http://127.0.0.1:${port}/m/…`);
   });
@@ -118,8 +145,10 @@ export function startMediaServer(): void {
 /** Build a loopback URL the renderer can put in a <video src>. Null until ready. */
 export function mediaUrlFor(absPath: string): string | null {
   if (!server || !port || !absPath) return null;
-  if (!isPathAllowed(absPath, allowedRoots)) return null;
-  const enc = Buffer.from(absPath, 'utf8').toString('base64url');
+  // Canonicalize so the URL encodes the same real path the server will enforce.
+  const real = canonical(absPath);
+  if (!real || !isPathAllowed(real, allowedRoots)) return null;
+  const enc = Buffer.from(real, 'utf8').toString('base64url');
   return `http://127.0.0.1:${port}/m/${token}/${enc}`;
 }
 
@@ -127,4 +156,5 @@ export function stopMediaServer(): void {
   server?.close();
   server = null;
   port = 0;
+  listening = false;
 }
