@@ -31,9 +31,12 @@ nsis:
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
-  # DMG only — no zip, no auto-update metadata. CI uploads just the .dmg.
+  # DMG is the human download; the zip + latest-mac.yml (generated for the zip)
+  # are what electron-updater needs, so auto-update keeps working. One build, one
+  # update channel — no core/pro split, no arch variants to confuse anyone.
   target:
     - dmg
+    - zip
   category: public.app-category.productivity
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
@@ -73,4 +76,6 @@ publish:
   provider: github
   owner: off-grid-ai
   repo: desktop
+  # Publish (not draft) so electron-updater on installed apps sees the release.
+  releaseType: release
   releaseType: release
