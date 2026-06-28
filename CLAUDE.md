@@ -56,6 +56,8 @@ This is a hard rule, not a preference. **Before writing ANY new component, panel
 - Shared, reusable **engines** (e.g. `@offgrid/clipboard`) stay in `shared/` and may be consumed by either tier; it's the desktop **pro integration** that must live in `pro/`.
 - `proEnabled()` (main) / `isPro` (renderer) gate activation; `OFFGRID_PRO=0` forces free. Gating alone is not enough — the source must also physically live in `pro/`.
 
+**Settings sections follow the same rule.** A pro Settings section (proactive delivery, secretary/learned-prefs, identity, fleet console, etc.) is pro feature code — its component + logic live in `pro/renderer` and register into the core Settings screen via the section-registry seam (`pro/renderer/settings.ts` `registerProSettings` → core `registerSettingsSection`; core renders its own sections + all registered ones). Core must NOT hardcode pro section bodies in `Settings.tsx` gated by `isPro` — core only renders a dimmed `ProPlaceholder` for the locked preview when the section isn't registered (free build). Do not `if (isPro) <RealProSection/> : <ProPlaceholder/>` with the real section defined in core.
+
 ## Architecture & abstractions (SOLID)
 
 Design to abstractions, not concrete types. When implementations are interchangeable (model backends, TTS/STT engines, image/diffusion runtimes, connectors), the rest of the app depends on one service/interface — never branch on a concrete type in UI/stores (`if (engine === 'kokoro')`, `instanceof X`). Push the decision behind the abstraction; adding an implementation should need zero changes to callers. Normalize capability gaps inside the service, not the UI.
