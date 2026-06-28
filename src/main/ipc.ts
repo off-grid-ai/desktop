@@ -1420,28 +1420,20 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       return autoConfigure((p) =>
           BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('setup:progress', p)));
   });
-  // Restart a component. Currently only the chat LLM (llama-server) is restartable.
+  // Restart a component. We only ever stop OUR OWN processes — never SIGKILL an
+  // arbitrary PID holding the port (that could kill an unrelated user app, and the
+  // handler is renderer-reachable). llm.restart() tears down our llama-server with
+  // a command-name guard; the gateway just stops + restarts our own server.
   ipcMain.handle('system:restart', async (_e, id: string) => {
-      // Free the port of ANY process holding it (not just our own), then start ours.
-      const freePort = async (port: number): Promise<void> => {
-          try {
-              const { execSync } = await import('child_process');
-              const pids = execSync(`lsof -ti tcp:${port}`, { encoding: 'utf-8' }).trim().split('\n').filter(Boolean);
-              for (const pid of pids) { try { process.kill(Number(pid), 'SIGKILL'); } catch { /* gone */ } }
-              if (pids.length) await new Promise((r) => setTimeout(r, 400)); // let the port free
-          } catch { /* nothing on the port */ }
-      };
       if (id === 'chat') {
-          await freePort(8439);
           const { llm } = await import('./llm');
-          await llm.restart();
+          await llm.restart(); // safely stops our llama-server (guarded) and respawns
           return { success: true };
       }
       if (id === 'gateway') {
           const { startModelServer, stopModelServer } = await import('./model-server');
           try { stopModelServer(); } catch { /* not running */ }
-          await freePort(7878);
-          startModelServer();
+          startModelServer(); // re-listens; if the port is held by a non-Off-Grid process it logs and no-ops
           return { success: true };
       }
       return { success: false, error: `cannot restart "${id}"` };
@@ -1593,8 +1585,16 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
   ipcMain.handle('files:data-url', async (_e, p: string) => {
       try {
           const fs = await import('fs');
-          const buf = await fs.promises.readFile(p);
-          const ext = (p.split('.').pop() || '').toLowerCase();
+          const path = await import('path');
+          const { app } = await import('electron');
+          // Only ever serve files inside the app's uploads dir — this handler is
+          // renderer-reachable, so reading an arbitrary path would be a file-read /
+          // exfiltration primitive. Resolve + boundary-check before touching disk.
+          const root = path.resolve(app.getPath('userData'), 'uploads');
+          const resolved = path.resolve(p ?? '');
+          if (resolved !== root && !resolved.startsWith(root + path.sep)) return null;
+          const buf = await fs.promises.readFile(resolved);
+          const ext = (resolved.split('.').pop() || '').toLowerCase();
           const mime = ext === 'pdf' ? 'application/pdf' : ext === 'png' ? 'image/png' : /^jpe?g$/.test(ext) ? 'image/jpeg' : 'application/octet-stream';
           return `data:${mime};base64,${buf.toString('base64')}`;
       } catch { return null; }
