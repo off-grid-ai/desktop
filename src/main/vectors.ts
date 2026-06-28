@@ -71,11 +71,20 @@ export async function deleteByKinds(kinds: string[]): Promise<void> {
   const tbl = await table();
   if (!tbl) return;
   const list = kinds.map((k) => `'${String(k).replace(/'/g, "''")}'`).join(', ');
-  try {
-    await tbl.delete(`kind IN (${list})`);
-  } catch (e) {
-    console.error('[vectors] deleteByKinds failed', e);
-  }
+  // Let failures propagate: the privacy path must not report success when the
+  // semantic index wasn't actually cleared.
+  await tbl.delete(`kind IN (${list})`);
+}
+
+/** Like deleteByKinds, but only rows older than `cutoffMs` (epoch ms) — for
+ *  age-based retention cleanup so pruned captures/meetings don't leave ghost
+ *  vector hits behind. */
+export async function deleteByKindsOlderThan(kinds: string[], cutoffMs: number): Promise<void> {
+  if (!kinds.length) return;
+  const tbl = await table();
+  if (!tbl) return;
+  const list = kinds.map((k) => `'${String(k).replace(/'/g, "''")}'`).join(', ');
+  await tbl.delete(`kind IN (${list}) AND ts < ${Math.floor(cutoffMs)}`);
 }
 
 /** Drop the cached connection + table handles. Call after the lancedb dir is

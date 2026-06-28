@@ -63,7 +63,12 @@ export async function processUpload(name: string, bytes: ArrayBuffer | Uint8Arra
       await fs.promises.mkdir(dir, { recursive: true });
       const dest = path.join(dir, `${Date.now()}-${safe}`);
       await fs.promises.copyFile(tmp, dest);
-      return { name, kind: 'pdf', text: ex.extractPdf ? await ex.extractPdf(tmp, 200_000) : '', path: dest };
+      // Text extraction is best-effort: the PDF is already persisted and viewable,
+      // so a parse failure must NOT make the file unattachable — fall back to ''.
+      let text = '';
+      try { if (ex.extractPdf) text = await ex.extractPdf(tmp, 200_000); }
+      catch (e) { console.warn('[files] PDF text extraction failed; attaching without text:', (e as Error)?.message); }
+      return { name, kind: 'pdf', text, path: dest };
     }
     if (ext === 'docx') return { name, kind: 'docx', text: ex.extractDocx ? await ex.extractDocx(tmp, 200_000) : '' };
     // Everything else is treated as text — .txt/.md and every programming

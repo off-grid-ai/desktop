@@ -2,6 +2,17 @@
 // the path-allowlist guard can be unit-tested without booting Electron.
 
 import path from 'path';
+import fs from 'fs';
+
+/** Canonicalize a path: resolve symlinks + `..` to the real on-disk path. Falls
+ *  back to a plain `path.resolve` when the path doesn't exist yet (realpath throws). */
+function canonical(p: string): string {
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
 
 export interface ResolvedRange {
   start: number;
@@ -22,12 +33,14 @@ export function parseRange(rangeHeader: string | null | undefined, size: number)
   return { start, end, full: false, unsatisfiable: false };
 }
 
-/** Is `target` inside one of `roots` (after resolving `..`)? Blocks path escapes. */
+/** Is `target` inside one of `roots`? Symlink-safe: both sides are canonicalized
+ *  (realpath) so a symlink inside a root can't smuggle a path outside it, and `..`
+ *  escapes are normalized away. */
 export function isPathAllowed(target: string, roots: string[]): boolean {
   if (!target) return false;
-  const real = path.resolve(target);
+  const real = canonical(target);
   return roots.some((root) => {
-    const r = path.resolve(root);
+    const r = canonical(root);
     return real === r || real.startsWith(r + path.sep);
   });
 }

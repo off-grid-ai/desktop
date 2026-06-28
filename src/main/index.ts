@@ -14,6 +14,7 @@ import { setupRagIPC } from './rag-ipc'
 import { setupMcpIpc } from './mcp-ipc'
 import { startModelServer } from './model-server'
 import { startMediaServer, mediaUrlFor } from './media-server'
+import { isPathAllowed } from './media-range'
 import { ipcMain } from 'electron'
 import { loadProFeaturesMain } from './bootstrap/loadProFeaturesMain'
 import { initLicensing } from './licensing/license-service'
@@ -190,8 +191,17 @@ app.whenReady().then(() => {
       cancel() { done = true; rs.destroy(); },
     });
   };
+  // Only serve files inside the app's own media dirs — this scheme is reachable
+  // from the renderer, so serving an arbitrary decoded path would be a local-file
+  // read primitive. isPathAllowed is symlink-safe (canonicalizes both sides).
+  const ogCaptureRoots = ['meetings', 'uploads', 'captures', 'entity-photos'].map((d) =>
+    join(app.getPath('userData'), d),
+  );
   protocol.handle('ogcapture', async (request) => {
     const p = decodeURIComponent(request.url.slice('ogcapture://'.length));
+    if (!isPathAllowed(p, ogCaptureRoots)) {
+      return new Response(null, { status: 403 });
+    }
     try {
       const stat = await fs.promises.stat(p);
       const size = stat.size;

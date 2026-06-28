@@ -70,17 +70,16 @@ test('Resource mode is selectable (Conservative)', async () => {
   await expect(cons).toHaveAttribute('aria-pressed', 'true');
 });
 
-test('Clipboard: hotkey hint + its own settings screen', async () => {
+test('Clipboard is a Pro tab in the core build (shows upgrade)', async () => {
+  // Clipboard moved to Pro: in the core/free tour (OFFGRID_PRO=0) the tab is
+  // locked and renders the upgrade screen, not the clipboard manager/settings.
   await nav('Clipboard');
-  await expect(page.getByText('⌘⇧C', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Clipboard settings' }).click();
-  await expect(page.getByRole('heading', { name: 'Clipboard settings' })).toBeVisible();
-  await expect(page.getByText('Keep history for')).toBeVisible();
-  await expect(page.getByText('Maximum items')).toBeVisible();
+  await expect(page.getByText('Off Grid Pro · Available now')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Clipboard' })).toBeVisible();
 });
 
 test('Gateway screen renders', async () => {
-  await nav('Settings'); // leave clipboard settings first
+  await nav('Settings'); // leave the clipboard upgrade screen first
   await nav('Gateway');
   await expect(page.getByText(/OpenAI-compatible/i).first()).toBeVisible();
 });

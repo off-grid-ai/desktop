@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { app } from 'electron';
 import { getDB } from './database';
-import { deleteByKinds, resetVectors } from './vectors';
+import { deleteByKinds, deleteByKindsOlderThan, resetVectors } from './vectors';
 
 export interface DataCategory {
   id: 'chats' | 'memories' | 'captures' | 'meetings' | 'images';
@@ -105,40 +105,48 @@ export function getDataSummary(): DataCategory[] {
 /** Delete one category of data (SQL rows + its directories). For captures/meetings,
  *  pass olderThanDays to delete only entries older than N days (retention cleanup). */
 export async function clearCategory(id: DataCategory['id'], olderThanDays?: number): Promise<{ success: boolean }> {
-  switch (id) {
-    case 'chats':
-      clearTables(...CHAT_TABLES);
-      clearDirs(ud('uploads'));
-      break;
-    case 'memories':
-      clearTables(...MEMORY_TABLES);
-      clearDirs(ud('entity-photos'));
-      // Delete ONLY the memory-side vectors (not the shared lancedb dir — that
-      // would wipe capture/meeting/chat vectors and dangle the live handle).
-      await deleteByKinds(['memory', 'entity', 'fact']);
-      break;
-    case 'captures':
-      if (olderThanDays && olderThanDays > 0) {
-        clearDirsOlderThan(olderThanDays, ud('captures'));
-      } else {
-        clearDirs(ud('captures'));
-        await deleteByKinds(['screen']); // full clear → drop capture vectors too
-      }
-      break;
-    case 'meetings':
-      if (olderThanDays && olderThanDays > 0) {
-        clearDirsOlderThan(olderThanDays, ud('meetings'));
-      } else {
-        clearDirs(ud('meetings'));
-        await deleteByKinds(['meeting']); // full clear → drop meeting vectors too
-      }
-      pruneDanglingMeetings(); // drop rows whose media we just deleted (no ghosts)
-      break;
-    case 'images':
-      clearDirs(ud('generated-images'), ud('artifacts-library'), ud('style-thumbs'));
-      break;
+  try {
+    switch (id) {
+      case 'chats':
+        clearTables(...CHAT_TABLES);
+        clearDirs(ud('uploads'));
+        break;
+      case 'memories':
+        clearTables(...MEMORY_TABLES);
+        clearDirs(ud('entity-photos'));
+        // Delete ONLY the memory-side vectors (not the shared lancedb dir — that
+        // would wipe capture/meeting/chat vectors and dangle the live handle).
+        await deleteByKinds(['memory', 'entity', 'fact']);
+        break;
+      case 'captures':
+        if (olderThanDays && olderThanDays > 0) {
+          clearDirsOlderThan(olderThanDays, ud('captures'));
+          await deleteByKindsOlderThan(['screen'], Date.now() - olderThanDays * 86_400_000); // prune stale capture vectors too
+        } else {
+          clearDirs(ud('captures'));
+          await deleteByKinds(['screen']); // full clear → drop capture vectors too
+        }
+        break;
+      case 'meetings':
+        if (olderThanDays && olderThanDays > 0) {
+          clearDirsOlderThan(olderThanDays, ud('meetings'));
+          await deleteByKindsOlderThan(['meeting'], Date.now() - olderThanDays * 86_400_000); // prune stale meeting vectors too
+        } else {
+          clearDirs(ud('meetings'));
+          await deleteByKinds(['meeting']); // full clear → drop meeting vectors too
+        }
+        pruneDanglingMeetings(); // drop rows whose media we just deleted (no ghosts)
+        break;
+      case 'images':
+        clearDirs(ud('generated-images'), ud('artifacts-library'), ud('style-thumbs'));
+        break;
+    }
+    return { success: true };
+  } catch (e) {
+    // Surface failure instead of falsely claiming the data (incl. its vectors) was cleared.
+    console.error('[data-privacy] clearCategory failed', id, e);
+    return { success: false };
   }
-  return { success: true };
 }
 
 /** Delete ALL personal data (every category + the user profile). Leaves installed

@@ -64,7 +64,6 @@ var ClipboardEngine = class {
     if (!read || read.rawData.length === 0) return null;
     const hash = this.opts.hash(read.rawData);
     if (hash === this.lastHash) return null;
-    this.lastHash = hash;
     const inserted = this.opts.store.insert({
       timestamp: Date.now(),
       contentType: read.contentType,
@@ -73,8 +72,15 @@ var ClipboardEngine = class {
       sourceApp: read.sourceApp ?? null,
       hash
     });
+    this.lastHash = hash;
     if (inserted) {
-      for (const l of this.listeners) l(inserted);
+      for (const l of this.listeners) {
+        try {
+          l(inserted);
+        } catch (e) {
+          console.error("[clipboard] onItem listener threw", e);
+        }
+      }
     }
     return inserted;
   }

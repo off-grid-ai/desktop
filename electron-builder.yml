@@ -78,4 +78,3 @@ publish:
   repo: desktop
   # Publish (not draft) so electron-updater on installed apps sees the release.
   releaseType: release
-  releaseType: release

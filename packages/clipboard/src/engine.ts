@@ -71,7 +71,6 @@ export class ClipboardEngine {
 
     const hash = this.opts.hash(read.rawData);
     if (hash === this.lastHash) return null;
-    this.lastHash = hash;
 
     const inserted = this.opts.store.insert({
       timestamp: Date.now(),
@@ -81,9 +80,17 @@ export class ClipboardEngine {
       sourceApp: read.sourceApp ?? null,
       hash,
     });
+    // Only mark this content as "seen" AFTER a successful store write — if insert
+    // throws, leave lastHash so the payload is retried on the next tick instead of
+    // being silently dropped.
+    this.lastHash = hash;
 
     if (inserted) {
-      for (const l of this.listeners) l(inserted);
+      // Isolate subscribers: a throwing listener must not escape the poll timer
+      // (that can take down the Electron main process) or block other listeners.
+      for (const l of this.listeners) {
+        try { l(inserted); } catch (e) { console.error('[clipboard] onItem listener threw', e); }
+      }
     }
     return inserted;
   }
