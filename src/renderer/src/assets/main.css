@@ -357,12 +357,12 @@ code {
    bright dots on dark. Tiled radial-gradients, repeated across the viewport. */
 .og-starfield {
   background-image:
-    radial-gradient(1.5px 1.5px at 30px 40px, rgba(0,0,0,0.34), transparent),
-    radial-gradient(1px 1px at 110px 90px, rgba(0,0,0,0.24), transparent),
-    radial-gradient(1px 1px at 170px 28px, rgba(0,0,0,0.30), transparent),
-    radial-gradient(2px 2px at 70px 158px, rgba(0,0,0,0.30), transparent),
-    radial-gradient(1px 1px at 150px 192px, rgba(0,0,0,0.22), transparent),
-    radial-gradient(1px 1px at 205px 120px, rgba(0,0,0,0.26), transparent);
+    radial-gradient(1.5px 1.5px at 30px 40px, rgba(0,0,0,0.55), transparent),
+    radial-gradient(1px 1px at 110px 90px, rgba(0,0,0,0.42), transparent),
+    radial-gradient(1.5px 1.5px at 170px 28px, rgba(0,0,0,0.50), transparent),
+    radial-gradient(2px 2px at 70px 158px, rgba(0,0,0,0.50), transparent),
+    radial-gradient(1px 1px at 150px 192px, rgba(0,0,0,0.38), transparent),
+    radial-gradient(1px 1px at 205px 120px, rgba(0,0,0,0.45), transparent);
   background-size: 220px 220px;
   background-repeat: repeat;
 }
