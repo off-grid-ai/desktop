@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { LockKey, X } from '@phosphor-icons/react';
+import { LockKey, X, CheckCircle, Desktop, EnvelopeSimple } from '@phosphor-icons/react';
 import { ProgressiveBlur } from './ui/progressive-blur';
 import { SetupPanel } from './setup/SetupPanel';
 import { StoragePanel } from './setup/StoragePanel';
@@ -139,6 +139,84 @@ function SecretaryPrefs(): React.ReactElement {
   );
 }
 
+const MAX_DEVICES = 5;
+interface PlanInfo { isPro: boolean; tier: 'lifetime' | 'monthly' | null; expiry: string | null }
+interface PlanDevice { id: string; name?: string; platform?: string; lastSeen?: string }
+
+// Pro plan + devices, mirroring mobile's ProManageSection. Read-only device list
+// (the cap is fixed, no self-service removal); for monthly, the cancel/update path
+// is the link in the purchase/renewal email (no in-app billing portal).
+function ProPlanSection(): React.ReactElement {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const api = (window as any).api;
+  const [info, setInfo] = useState<PlanInfo | null>(null);
+  const [devices, setDevices] = useState<PlanDevice[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let live = true;
+    void Promise.all([api?.license?.status?.(), api?.license?.listDevices?.()])
+      .then(([i, d]: [PlanInfo, PlanDevice[]]) => { if (!live) return; setInfo(i ?? null); setDevices(Array.isArray(d) ? d : []); })
+      .catch(() => {})
+      .finally(() => { if (live) setLoading(false); });
+    return () => { live = false; };
+  }, [api]);
+
+  const fmt = (iso?: string | null): string => {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); } catch { return iso; }
+  };
+  const statusLine = info?.tier === 'lifetime' ? 'Lifetime · never expires'
+    : info?.tier === 'monthly' ? `Monthly · active until ${fmt(info.expiry)}`
+    : 'Pro active';
+
+  return (
+    <motion.div
+      className="rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 p-6"
+      initial={{ opacity: 0, filter: 'blur(10px)' }}
+      animate={{ opacity: 1, filter: 'blur(0px)' }}
+      transition={{ duration: 0.6, delay: 0.3 }}
+    >
+      <h3 className="text-white font-medium text-base mb-1">Your Pro plan</h3>
+      <p className="text-neutral-500 text-sm mb-4">Your subscription and the devices on this license.</p>
+      {loading ? (
+        <p className="text-sm text-neutral-600">Loading…</p>
+      ) : (
+        <>
+          <div className="flex items-center gap-2 text-sm text-neutral-200">
+            <CheckCircle weight="fill" className="h-4 w-4 text-green-500" /> {statusLine}
+          </div>
+
+          <div className="mt-5">
+            <div className="text-[11px] uppercase tracking-wide text-neutral-500">Devices ({devices.length} of {MAX_DEVICES})</div>
+            <p className="mt-0.5 text-[11px] text-neutral-600">A license works on up to {MAX_DEVICES} devices. This limit is fixed.</p>
+            <ul className="mt-2 divide-y divide-neutral-800/60 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950/40">
+              {devices.length === 0 ? (
+                <li className="px-3 py-2 text-sm text-neutral-600">No devices registered yet.</li>
+              ) : devices.map((m) => (
+                <li key={m.id} className="flex items-center gap-2.5 px-3 py-2">
+                  <Desktop className="h-4 w-4 shrink-0 text-neutral-500" />
+                  <span className="min-w-0 flex-1 truncate text-sm text-neutral-300">{m.name || m.platform || 'Device'}</span>
+                  {m.lastSeen && <span className="shrink-0 text-[11px] text-neutral-600">Added {fmt(m.lastSeen)}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {info?.tier === 'monthly' && (
+            <div className="mt-5">
+              <div className="text-[11px] uppercase tracking-wide text-neutral-500">Manage subscription</div>
+              <p className="mt-1 flex items-start gap-2 text-[11px] text-neutral-500">
+                <EnvelopeSimple className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                To cancel or update your payment method, use the link in your Off Grid purchase or renewal email - one is sent with every payment.
+              </p>
+            </div>
+          )}
+        </>
+      )}
+    </motion.div>
+  );
+}
+
 
 export function Settings() {
   // Pro/core aware: the proactive / secretary / fleet-console sections are Pro
@@ -239,6 +317,7 @@ export function Settings() {
           {/* Pro sections — shown but disabled in the free build. */}
           {isPro ? <ProactiveSection /> : <ProPlaceholder title="Proactive delivery" description="A morning briefing and a heads-up before each meeting — native notifications, even when the window is closed." />}
           {isPro ? <SecretaryPrefs /> : <ProPlaceholder title="What Off Grid has learned" description="Preferences distilled from the suggestions you dismiss, fed back to your assistant so it gets sharper over time." />}
+          {isPro && <ProPlanSection />}
 
           {/* Data & privacy — one place to delete on-device data. */}
           <motion.div
