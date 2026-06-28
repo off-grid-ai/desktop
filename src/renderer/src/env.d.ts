@@ -206,6 +206,8 @@ interface IElectronAPI {
   onNewApproval: (callback: (data: { approvalId: number; title: string; detail: string; entityName: string | null }) => void) => () => void
   onNewAction: (callback: (data: { actionId: number; text: string; due: string | null; entityName: string | null; sourceApp: string }) => void) => () => void
   onReprocessProgress: (callback: (data: ReprocessProgress) => void) => () => void
+  onUpdateDownloaded: (callback: (data: { version: string }) => void) => () => void
+  installUpdate: () => Promise<void>
 
   // Permission APIs
   getPermissionStatus: () => Promise<PermissionStatus>

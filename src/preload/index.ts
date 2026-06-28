@@ -122,6 +122,16 @@ try {
       return () => ipcRenderer.removeListener('reprocess:progress', subscription)
     },
     
+    // Auto-update — fired when a new version finished downloading and is staged.
+    // installUpdate() forces the quit+swap (Squirrel only applies on a graceful
+    // quit; a force-kill would otherwise leave the download unapplied).
+    onUpdateDownloaded: (callback: (data: { version: string }) => void) => {
+      const subscription = (_: any, data: any) => callback(data)
+      ipcRenderer.on('update:downloaded', subscription)
+      return () => ipcRenderer.removeListener('update:downloaded', subscription)
+    },
+    installUpdate: () => ipcRenderer.invoke('update:install'),
+
     // Watcher Events
     onWatcherData: (callback: (data: any) => void) => {
       const subscription = (_: any, data: any) => callback(data)
