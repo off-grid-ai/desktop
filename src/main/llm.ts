@@ -388,19 +388,24 @@ export class LLMService {
       if (killed) await new Promise((r) => setTimeout(r, 400)); // let the port free
     } catch { /* nothing on the port */ }
 
-    this.server = spawn(serverPath, args, {
+    const proc = spawn(serverPath, args, {
       env: {
         ...process.env,
         DYLD_LIBRARY_PATH: binDir,
       },
     });
+    this.server = proc;
 
-    this.server.stderr?.on("data", (data) => {
+    proc.stderr?.on("data", (data) => {
       console.log(`[llama-server] ${data}`);
     });
 
-    this.server.on("close", (code, signal) => {
+    proc.on("close", (code, signal) => {
         console.log(`[llama-server] exited with code ${code} signal ${signal}`);
+        // Ignore the close of a PROCESS WE'VE ALREADY REPLACED: on restart/reload,
+        // stop() kills the old proc and init() spawns a new one; the old proc's
+        // close event fires async and must not null out the live server.
+        if (this.server !== proc) return;
         const wasIntentional = this.intentionalStop;
         this.intentionalStop = false;
         this.server = null;
