@@ -126,8 +126,8 @@ function ModelStatusDot({ open, onClick }: { open: boolean; onClick: () => void 
   // Collapsed: clicking opens the sidebar (the label/restart action lives there).
   // Expanded: clicking goes to Settings to restart.
   const label = open
-    ? (status === 'down' ? 'Model server stopped — open Settings to restart' : `Model server: ${text.toLowerCase()}`)
-    : `${text} — expand for details`;
+    ? (status === 'down' ? 'Model server stopped. Open Settings to restart.' : `Model server: ${text.toLowerCase()}`)
+    : `${text} - expand for details`;
   return (
     <button
       onClick={onClick}
