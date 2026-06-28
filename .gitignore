@@ -43,3 +43,6 @@ resources/bin/mflux/
 .env
 .env.local
 test-results/
+
+# Marketing material (dev.to drafts, emails, assets) — publishing, not app code
+/marketing/
