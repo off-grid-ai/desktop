@@ -1,10 +1,53 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { LockKey, X } from '@phosphor-icons/react';
+import { LockKey, X, CheckCircle, Desktop, EnvelopeSimple, CaretDown } from '@phosphor-icons/react';
+import { cn } from '@renderer/lib/utils';
 import { ProgressiveBlur } from './ui/progressive-blur';
 import { SetupPanel } from './setup/SetupPanel';
 import { StoragePanel } from './setup/StoragePanel';
 import { DataPrivacyPanel } from './setup/DataPrivacyPanel';
+
+// Collapsible Settings card: same chrome as before, but the body is hidden until
+// the user expands it (closed by default). The header shows the title always and a
+// one-line summary while collapsed, with a chevron that flips when open. Keeps the
+// long Settings sections scannable.
+function SettingsCard({
+  title,
+  summary,
+  defaultOpen = false,
+  children,
+  delay = 0.13,
+}: {
+  title: string;
+  summary: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+  delay?: number;
+}): React.ReactElement {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <motion.div
+      className="overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900/60 backdrop-blur-sm"
+      initial={{ opacity: 0, filter: 'blur(10px)' }}
+      animate={{ opacity: 1, filter: 'blur(0px)' }}
+      transition={{ duration: 0.6, delay }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-3 p-6 text-left"
+      >
+        <div className="min-w-0 flex-1">
+          <h3 className="text-base font-medium text-white">{title}</h3>
+          {!open && <p className="mt-1 text-sm text-neutral-500">{summary}</p>}
+        </div>
+        <CaretDown className={cn('h-4 w-4 shrink-0 text-neutral-500 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && <div className="px-6 pb-6">{children}</div>}
+    </motion.div>
+  );
+}
 
 // A Pro section shown (disabled) in the free build: title + description + a
 // "Pro · July 2026" badge, dimmed and non-interactive.
@@ -45,30 +88,21 @@ function ProactiveSection(): React.ReactElement {
     setEnabled(next);
     api.saveSetting?.('proactive:enabled', next);
   };
+  // Body only — the card chrome + title come from SettingsCard.
   return (
-    <motion.div
-      className="rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 p-6"
-      initial={{ opacity: 0, filter: 'blur(10px)' }}
-      animate={{ opacity: 1, filter: 'blur(0px)' }}
-      transition={{ duration: 0.6, delay: 0.18 }}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="text-white font-medium text-base mb-1">Proactive delivery</h3>
-          <p className="text-neutral-500 text-sm">
-            Off Grid reaches out on its own — a morning briefing of your day and a heads-up ~20 min before each meeting with who’s in it and your open items. Delivered as native notifications, even when the window is closed.
-          </p>
-        </div>
-        <button
-          onClick={toggle}
-          role="switch"
-          aria-checked={enabled}
-          className={`relative mt-1 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${enabled ? 'bg-emerald-500' : 'bg-neutral-700'}`}
-        >
-          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
-        </button>
-      </div>
-    </motion.div>
+    <div className="flex items-start justify-between gap-4">
+      <p className="text-neutral-500 text-sm">
+        Off Grid reaches out on its own - a morning briefing of your day and a heads-up ~20 min before each meeting with who is in it and your open items. Delivered as native notifications, even when the window is closed.
+      </p>
+      <button
+        onClick={toggle}
+        role="switch"
+        aria-checked={enabled}
+        className={`relative mt-1 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${enabled ? 'bg-emerald-500' : 'bg-neutral-700'}`}
+      >
+        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+      </button>
+    </div>
   );
 }
 
@@ -98,16 +132,11 @@ function SecretaryPrefs(): React.ReactElement {
   };
   const clear = async (): Promise<void> => { setDoc(''); await api.secretaryPrefsSet?.(''); };
 
+  // Body only — the card chrome + title come from SettingsCard.
   return (
-    <motion.div
-      className="rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 p-6"
-      initial={{ opacity: 0, filter: 'blur(10px)' }}
-      animate={{ opacity: 1, filter: 'blur(0px)' }}
-      transition={{ duration: 0.6, delay: 0.18 }}
-    >
-      <h3 className="text-white font-medium text-base mb-1">What Off Grid has learned</h3>
+    <div>
       <p className="text-neutral-500 text-sm mb-4">
-        Preferences distilled from the reasons you give when you dismiss a suggestion. This is the only learned text fed back to the assistant — it refreshes about once an hour, and raw notes are never used directly. You can remove any line you disagree with.
+        Preferences distilled from the reasons you give when you dismiss a suggestion. This is the only learned text fed back to the assistant - it refreshes about once an hour, and raw notes are never used directly. You can remove any line you disagree with.
       </p>
       {lines.length ? (
         <ul className="divide-y divide-neutral-800/60 overflow-hidden rounded-xl border border-neutral-700/50 bg-neutral-800/40">
@@ -127,7 +156,7 @@ function SecretaryPrefs(): React.ReactElement {
         </ul>
       ) : (
         <p className="rounded-xl border border-neutral-700/50 bg-neutral-800/40 p-3 text-sm text-neutral-600">
-          Nothing learned yet. When you dismiss a suggestion, tell Off Grid why — it generalizes the useful ones here.
+          Nothing learned yet. When you dismiss a suggestion, tell Off Grid why - it generalizes the useful ones here.
         </p>
       )}
       {lines.length > 0 && (
@@ -135,7 +164,79 @@ function SecretaryPrefs(): React.ReactElement {
           <button onClick={clear} className="rounded-lg px-3 py-1.5 text-xs text-neutral-500 hover:text-white">Clear all</button>
         </div>
       )}
-    </motion.div>
+    </div>
+  );
+}
+
+const MAX_DEVICES = 5;
+interface PlanInfo { isPro: boolean; tier: 'lifetime' | 'monthly' | null; expiry: string | null }
+interface PlanDevice { id: string; name?: string; platform?: string; lastSeen?: string }
+
+// Pro plan + devices, mirroring mobile's ProManageSection. Read-only device list
+// (the cap is fixed, no self-service removal); for monthly, the cancel/update path
+// is the link in the purchase/renewal email (no in-app billing portal).
+function ProPlanSection(): React.ReactElement {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const api = (window as any).api;
+  const [info, setInfo] = useState<PlanInfo | null>(null);
+  const [devices, setDevices] = useState<PlanDevice[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let live = true;
+    void Promise.all([api?.license?.status?.(), api?.license?.listDevices?.()])
+      .then(([i, d]: [PlanInfo, PlanDevice[]]) => { if (!live) return; setInfo(i ?? null); setDevices(Array.isArray(d) ? d : []); })
+      .catch(() => {})
+      .finally(() => { if (live) setLoading(false); });
+    return () => { live = false; };
+  }, [api]);
+
+  const fmt = (iso?: string | null): string => {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); } catch { return iso; }
+  };
+  const statusLine = info?.tier === 'lifetime' ? 'Lifetime · never expires'
+    : info?.tier === 'monthly' ? `Monthly · active until ${fmt(info.expiry)}`
+    : 'Pro active';
+
+  // Body only — the card chrome + title come from SettingsCard.
+  return (
+    <div>
+      {loading ? (
+        <p className="text-sm text-neutral-600">Loading…</p>
+      ) : (
+        <>
+          <div className="flex items-center gap-2 text-sm text-neutral-200">
+            <CheckCircle weight="fill" className="h-4 w-4 text-green-500" /> {statusLine}
+          </div>
+
+          <div className="mt-5">
+            <div className="text-[11px] uppercase tracking-wide text-neutral-500">Devices ({devices.length} of {MAX_DEVICES})</div>
+            <p className="mt-0.5 text-[11px] text-neutral-600">A license works on up to {MAX_DEVICES} devices. This limit is fixed.</p>
+            <ul className="mt-2 divide-y divide-neutral-800/60 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950/40">
+              {devices.length === 0 ? (
+                <li className="px-3 py-2 text-sm text-neutral-600">No devices registered yet.</li>
+              ) : devices.map((m) => (
+                <li key={m.id} className="flex items-center gap-2.5 px-3 py-2">
+                  <Desktop className="h-4 w-4 shrink-0 text-neutral-500" />
+                  <span className="min-w-0 flex-1 truncate text-sm text-neutral-300">{m.name || m.platform || 'Device'}</span>
+                  {m.lastSeen && <span className="shrink-0 text-[11px] text-neutral-600">Added {fmt(m.lastSeen)}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {info?.tier === 'monthly' && (
+            <div className="mt-5">
+              <div className="text-[11px] uppercase tracking-wide text-neutral-500">Manage subscription</div>
+              <p className="mt-1 flex items-start gap-2 text-[11px] text-neutral-500">
+                <EnvelopeSimple className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                To cancel or update your payment method, use the link in your Off Grid purchase or renewal email - one is sent with every payment.
+              </p>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -196,63 +297,54 @@ export function Settings() {
           transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
         >
 
-          {/* Setup & health — available in every build. Re-run setup or check
-              what's running at any time. */}
-          <motion.div
-            className="rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 p-6"
-            initial={{ opacity: 0, filter: 'blur(10px)' }}
-            animate={{ opacity: 1, filter: 'blur(0px)' }}
-            transition={{ duration: 0.6, delay: 0.13 }}
-          >
-            <h3 className="text-white font-medium text-base mb-1">Setup &amp; health</h3>
-            <p className="text-neutral-500 text-sm mb-4">
-              Set up your local AI in one click, or browse models yourself. The status of every
-              on-device component is shown live below.
-            </p>
+          {/* Each section is a collapsed-by-default accordion (SettingsCard). */}
+          <SettingsCard title="Setup & health" summary="Set up your local AI, manage storage, and see live component health." delay={0.13}>
             <SetupPanel />
             <div className="mt-4">
               <StoragePanel />
             </div>
-          </motion.div>
+          </SettingsCard>
 
           {/* Identity — who you are (Pro: foundation for the act pillar) */}
           {isPro ? (
-            <motion.div
-              className="rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 p-6"
-              initial={{ opacity: 0, filter: 'blur(10px)' }}
-              animate={{ opacity: 1, filter: 'blur(0px)' }}
-              transition={{ duration: 0.6, delay: 0.15 }}
-            >
-              <h3 className="text-white font-medium text-base mb-1">You</h3>
+            <SettingsCard title="You" summary="Who you are, so Off Grid can attribute your messages and calendar." delay={0.15}>
               <p className="text-neutral-500 text-sm mb-4">
-                Tells Off Grid who “you” are — so it can tell your messages and commitments apart from everyone else’s. Used to attribute action items and to make sense of your email and calendar.
+                Tells Off Grid who you are - so it can tell your messages and commitments apart from everyone else&apos;s. Used to attribute action items and to make sense of your email and calendar.
               </p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <input value={idName} onChange={(e) => setIdName(e.target.value)} onBlur={saveIdentity} placeholder="Your name" className="rounded-xl bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 outline-none focus:border-neutral-600" />
                 <input value={idEmail} onChange={(e) => setIdEmail(e.target.value)} onBlur={saveIdentity} placeholder="you@email.com" className="rounded-xl bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 outline-none focus:border-neutral-600" />
               </div>
-            </motion.div>
+            </SettingsCard>
           ) : (
-            <ProPlaceholder delay={0.15} title="You" description="Tell Off Grid who you are so it can attribute your messages, commitments, and calendar — part of the Pro intelligence layer." />
+            <ProPlaceholder delay={0.15} title="You" description="Tell Off Grid who you are so it can attribute your messages, commitments, and calendar - part of the Pro intelligence layer." />
           )}
 
           {/* Pro sections — shown but disabled in the free build. */}
-          {isPro ? <ProactiveSection /> : <ProPlaceholder title="Proactive delivery" description="A morning briefing and a heads-up before each meeting — native notifications, even when the window is closed." />}
-          {isPro ? <SecretaryPrefs /> : <ProPlaceholder title="What Off Grid has learned" description="Preferences distilled from the suggestions you dismiss, fed back to your assistant so it gets sharper over time." />}
+          {isPro ? (
+            <SettingsCard title="Proactive delivery" summary="A morning briefing and a heads-up before each meeting." delay={0.18}>
+              <ProactiveSection />
+            </SettingsCard>
+          ) : (
+            <ProPlaceholder title="Proactive delivery" description="A morning briefing and a heads-up before each meeting - native notifications, even when the window is closed." />
+          )}
+          {isPro ? (
+            <SettingsCard title="What Off Grid has learned" summary="Preferences distilled from your dismissals, fed back to the assistant." delay={0.22}>
+              <SecretaryPrefs />
+            </SettingsCard>
+          ) : (
+            <ProPlaceholder title="What Off Grid has learned" description="Preferences distilled from the suggestions you dismiss, fed back to your assistant so it gets sharper over time." />
+          )}
+          {isPro && (
+            <SettingsCard title="Your Pro plan" summary="Your subscription, devices, and how to cancel." delay={0.3}>
+              <ProPlanSection />
+            </SettingsCard>
+          )}
 
           {/* Data & privacy — one place to delete on-device data. */}
-          <motion.div
-            className="rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 p-6"
-            initial={{ opacity: 0, filter: 'blur(10px)' }}
-            animate={{ opacity: 1, filter: 'blur(0px)' }}
-            transition={{ duration: 0.6, delay: 0.42 }}
-          >
-            <h3 className="text-white font-medium text-base mb-1">Data &amp; privacy</h3>
-            <p className="text-neutral-500 text-sm mb-4">
-              Everything stays on this device. Delete any of it from here — per category, or all at once.
-            </p>
+          <SettingsCard title="Data & privacy" summary="See and delete on-device data, per category or all at once." delay={0.42}>
             <DataPrivacyPanel />
-          </motion.div>
+          </SettingsCard>
 
           {/* Version footer — so you always know which build you're on. */}
           <div className="flex items-center justify-center gap-2 pt-2 text-xs text-neutral-600">
