@@ -161,6 +161,11 @@ function AppContent() {
   const [viewMode, setViewMode] = useState<ViewMode>(isPro ? 'day' : 'models');
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedMemoryId, setSelectedMemoryId] = useState<number | null>(null);
+  // Version of a downloaded-and-staged update (null = none). Surfaced as a banner
+  // with a "Restart to update" button — Squirrel only applies on a clean quit, so
+  // we drive the install explicitly instead of waiting for one.
+  const [updateReady, setUpdateReady] = useState<string | null>(null);
+  const [installing, setInstalling] = useState(false);
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   // Search filter + sort live here (not in the screen) so they survive navigating
@@ -373,6 +378,18 @@ function AppContent() {
       unsubscribers.push(unsubscribe);
     }
 
+    // A new version finished downloading and is staged — show the restart banner.
+    // Seed from main too: on macOS the app can keep running with no windows, so a
+    // download that finished before this window existed would otherwise be missed
+    // (the event only reaches windows open at download time).
+    if (window.api?.onUpdateDownloaded) {
+      window.api.getStagedUpdateVersion?.().then((v) => { if (v) setUpdateReady(v); }).catch(() => {});
+      const unsubscribe = window.api.onUpdateDownloaded((data) => {
+        setUpdateReady(data.version);
+      });
+      unsubscribers.push(unsubscribe);
+    }
+
     return () => {
       unsubscribers.forEach(unsub => unsub());
     };
@@ -562,6 +579,33 @@ function AppContent() {
             </>
           )}
         </button>
+      )}
+      {/* Update ready — a new version downloaded and is staged. The button drives
+          the install (quit + swap + relaunch); a plain quit/force-kill would leave
+          it unapplied. */}
+      {updateReady && (
+        <div className="absolute right-4 top-4 z-50 flex items-center gap-3 rounded-md border border-green-500/40 bg-neutral-900/95 px-3.5 py-2 font-mono text-xs text-neutral-200 shadow-xl backdrop-blur">
+          <IconDownload className="h-4 w-4 text-green-500" />
+          <span>Update {updateReady} is ready</span>
+          <button
+            onClick={async () => {
+              if (!window.api?.installUpdate) return;
+              setInstalling(true);
+              try {
+                await window.api.installUpdate();
+              } catch {
+                // quitAndInstall normally never returns (the app exits). If it
+                // rejects, unlock the button so the user can retry.
+                setInstalling(false);
+                addNotification({ type: 'info', title: 'Update restart failed', message: 'Try again from the update banner.' });
+              }
+            }}
+            disabled={installing}
+            className="flex items-center gap-1.5 rounded-sm border border-green-500/50 bg-green-500/10 px-2.5 py-1 text-green-400 hover:bg-green-500/20 disabled:opacity-60"
+          >
+            {installing ? <><IconLoader2 className="h-3.5 w-3.5 animate-spin" /> Restarting…</> : 'Restart to update'}
+          </button>
+        </div>
       )}
       {/* Background — flat Off Grid terminal grid (theme-aware), with a dark-mode
           starfield + periodic shooting star layered on top. */}
