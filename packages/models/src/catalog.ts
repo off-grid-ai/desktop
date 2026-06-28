@@ -376,6 +376,7 @@ export const CATALOG: ModelEntry[] = [
         name: 'kokoro-82m-v1.0.onnx',
         url: resolve('onnx-community/Kokoro-82M-v1.0-ONNX', 'onnx/model_quantized.onnx'),
         role: 'primary',
+        sizeBytes: 92361116,
       },
     ],
   },

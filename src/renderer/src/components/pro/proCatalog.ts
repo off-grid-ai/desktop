@@ -7,6 +7,7 @@ import {
   Graph,
   MagnifyingGlass,
   Broadcast,
+  ClipboardText,
 } from '@phosphor-icons/react';
 import type { ComponentType } from 'react';
 
@@ -113,6 +114,19 @@ export const PRO_FEATURES: ProFeature[] = [
     description:
       'Off Grid reaches out first — a morning briefing, a heads-up before meetings, approvals waiting on your decision, and to-dos it pulled from your day — even when the window is closed.',
     highlights: ['Proactive briefings & meeting prep', 'Approval queue for actions', 'Auto-extracted to-dos'],
+  },
+  {
+    route: 'clipboard',
+    label: 'Clipboard',
+    icon: ClipboardText,
+    tagline: 'Every copy, kept and searchable.',
+    description:
+      'A local clipboard history that saves what you copy - text, images, and files - with a global hotkey (Cmd+Shift+C) quick-paste popup to drop any past copy into whatever app you are in. Stored on-device, nothing leaves your machine.',
+    highlights: [
+      'Searchable history of text, images & files',
+      'Cmd+Shift+C quick-paste popup anywhere',
+      'Stored locally in your encrypted database',
+    ],
   },
 ];
 

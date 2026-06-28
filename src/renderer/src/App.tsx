@@ -22,9 +22,9 @@ import { getProFeature } from './components/pro/proCatalog';
 import { NotificationProvider, useNotifications } from './hooks/useNotifications';
 import { ReprocessingProvider, useReprocessing } from './hooks/useReprocessing';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { StarsBackground } from './components/ui/stars-background';
-import { ShootingStars } from './components/ui/shooting-stars';
+import { GridBackdrop } from './components/ui/grid-backdrop';
 import { Sidebar, SidebarBody } from './components/ui/sidebar';
+import { NavThemeToggle } from './components/ThemeToggle';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   IconMessageCircle,
@@ -38,11 +38,12 @@ import {
   IconLayoutSidebarLeftExpand,
   IconLoader2,
   IconArrowLeft,
-  IconArrowRight
+  IconArrowRight,
+  IconActivityHeartbeat
 } from '@tabler/icons-react';
 import { cn } from './lib/utils';
 
-type ViewMode = 'dashboard' | 'day' | 'replay' | 'reflect' | 'actions' | 'connectors' | 'meetings' | 'chats' | 'memories' | 'entities' | 'graph' | 'memory-chat' | 'models' | 'gateway' | 'projects' | 'notifications' | 'settings' | 'search';
+type ViewMode = 'dashboard' | 'day' | 'replay' | 'reflect' | 'actions' | 'connectors' | 'meetings' | 'chats' | 'memories' | 'entities' | 'graph' | 'memory-chat' | 'models' | 'gateway' | 'projects' | 'notifications' | 'settings' | 'search' | 'clipboard';
 
 // Navigation state type for history tracking
 interface NavigationState {
@@ -96,6 +97,50 @@ function ReprocessingBanner() {
   );
 }
 
+// Model-server health dot for the sidebar. Uses the SAME live probe as the System
+// Health panel (system:health → real /health check), not llm.isReady() (an internal
+// flag that lags). Green = running, amber = starting, red = stopped (e.g. a SIGKILL
+// we can't auto-recover) → click goes to Settings to restart.
+type ChatHealth = 'ready' | 'starting' | 'down' | null;
+function ModelStatusDot({ open, onClick }: { open: boolean; onClick: () => void }): React.ReactElement {
+  const [status, setStatus] = useState<ChatHealth>(null);
+  useEffect(() => {
+    let live = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const api = (window as any).api;
+    const poll = async (): Promise<void> => {
+      try {
+        const h = await api?.systemHealth?.();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const chat = h?.components?.find((c: any) => c.id === 'chat');
+        const s: ChatHealth = chat?.status === 'ready' ? 'ready' : chat?.status === 'starting' ? 'starting' : 'down';
+        if (live) setStatus(s);
+      } catch { if (live) setStatus('down'); }
+    };
+    void poll();
+    const id = setInterval(poll, 5000);
+    return () => { live = false; clearInterval(id); };
+  }, []);
+  const color = status == null ? 'text-neutral-500' : status === 'ready' ? 'text-green-500' : status === 'starting' ? 'text-amber-500' : 'text-red-500';
+  const text = status == null ? 'Checking…' : status === 'ready' ? 'Model running' : status === 'starting' ? 'Model starting' : 'Model stopped';
+  // Collapsed: clicking opens the sidebar (the label/restart action lives there).
+  // Expanded: clicking goes to Settings to restart.
+  const label = open
+    ? (status === 'down' ? 'Model server stopped. Open Settings to restart.' : `Model server: ${text.toLowerCase()}`)
+    : `${text} - expand for details`;
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className={cn('flex items-center gap-3 rounded-lg py-2 text-sm text-neutral-500 transition-colors hover:bg-neutral-500/10 hover:text-neutral-300', open ? 'px-3' : 'justify-center px-0')}
+    >
+      <IconActivityHeartbeat className={cn('h-5 w-5 shrink-0', color)} />
+      {open && <span className="flex-1 text-left text-xs">{text}</span>}
+    </button>
+  );
+}
+
 function AppContent() {
   const { addNotification } = useNotifications();
 
@@ -117,6 +162,10 @@ function AppContent() {
   const [selectedMemoryId, setSelectedMemoryId] = useState<number | null>(null);
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  // Search filter + sort live here (not in the screen) so they survive navigating
+  // to a result and back.
+  const [searchSources, setSearchSources] = useState<string[]>([]);
+  const [searchSort, setSearchSort] = useState<'relevance' | 'recency' | 'match'>('relevance');
   const [replayTarget, setReplayTarget] = useState<number | null>(null);
   // A search hit can deep-link to a specific meeting; cleared on leaving Meetings.
   const [meetingTarget, setMeetingTarget] = useState<number | null>(null);
@@ -217,6 +266,17 @@ function AppContent() {
     }
   }, []);
 
+  // Programmatic navigation from outside the shell (e.g. the first-run gate's
+  // "pick a model yourself" CTA) — switch the active view without a remount.
+  useEffect(() => {
+    const onNav = (e: Event): void => {
+      const v = (e as CustomEvent).detail as ViewMode | undefined;
+      if (v) setViewMode(v);
+    };
+    window.addEventListener('og:navigate', onNav);
+    return () => window.removeEventListener('og:navigate', onNav);
+  }, []);
+
   // Update browser URL when view mode changes
   useEffect(() => {
     const urlMap: Record<ViewMode, string> = {
@@ -237,7 +297,8 @@ function AppContent() {
       'projects': '/projects',
       'notifications': '/notifications',
       'search': '/search',
-      'settings': '/settings'
+      'settings': '/settings',
+      'clipboard': '/clipboard'
     };
 
     const newPath = urlMap[viewMode];
@@ -382,6 +443,10 @@ function AppContent() {
     if (hit.kind === 'entity' || hit.kind === 'fact') { handleSelectEntity(hit.refId); return; }
     if (hit.kind === 'memory') { handleSelectMemory(hit.refId); return; }
     if (hit.kind === 'meeting') { setMeetingTarget(hit.refId || null); setViewMode('meetings'); return; }
+    // Chat conversation → open that exact chat (its id is carried in `url`).
+    if (hit.kind === 'chat') { setChatTarget(hit.url ? { conversationId: hit.url } : null); setViewMode('memory-chat'); return; }
+    // Knowledge-base doc → open its project (project_id carried in `url`).
+    if (hit.kind === 'doc') { setChatTarget(hit.url ? { projectId: hit.url } : null); setViewMode('memory-chat'); return; }
     // Screen capture → seek Replay to that exact moment (the captured frame is the
     // point; the source URL may be stale/missing).
     setReplayTarget(hit.ts || Date.now());
@@ -444,6 +509,7 @@ function AppContent() {
     proItem('entities'),
     { label: 'Projects', icon: <IconFolders className="h-5 w-5 shrink-0" />, view: 'projects' as ViewMode },
     { label: 'Chat', icon: <IconMessageCircle className="h-5 w-5 shrink-0" />, view: 'memory-chat' as ViewMode },
+    proItem('clipboard'),
     { label: 'Integrations', icon: <IconPlug className="h-5 w-5 shrink-0" />, view: 'connectors' as ViewMode },
     { label: 'Models', icon: <IconDownload className="h-5 w-5 shrink-0" />, view: 'models' as ViewMode },
     { label: 'Gateway', icon: <IconServer2 className="h-5 w-5 shrink-0" />, view: 'gateway' as ViewMode },
@@ -496,9 +562,8 @@ function AppContent() {
           )}
         </button>
       )}
-      {/* Background effects */}
-      <StarsBackground className="absolute inset-0 z-0" />
-      <ShootingStars />
+      {/* Background — flat Off Grid terminal grid (theme-aware) */}
+      <GridBackdrop className="z-0" />
 
       <div className="flex h-full relative z-10">
         {/* Aceternity Sidebar */}
@@ -524,10 +589,10 @@ function AppContent() {
                   onClick={() => setSidebarOpen(true)}
                   aria-label="Expand sidebar"
                   title="Expand"
-                  className="group/exp flex w-full flex-col items-center gap-1 py-2"
+                  className="group/exp flex w-full flex-col items-center gap-1.5 py-2"
                 >
                   <img src={logo} alt="Off Grid" className="h-8 w-8 shrink-0 rounded-lg" />
-                  <IconLayoutSidebarLeftExpand className="h-4 w-4 text-neutral-500 transition-colors group-hover/exp:text-white" />
+                  <IconLayoutSidebarLeftExpand className="h-5 w-5 text-neutral-500 transition-colors group-hover/exp:text-white" />
                 </button>
               )}
 
@@ -567,6 +632,8 @@ function AppContent() {
 
             {/* Pinned bottom */}
             <div className="flex flex-col gap-1 border-t border-neutral-200 pt-2 dark:border-neutral-800">
+              <ModelStatusDot open={sidebarOpen} onClick={() => (sidebarOpen ? setViewMode('settings') : setSidebarOpen(true))} />
+              <NavThemeToggle expanded={sidebarOpen} />
               {bottomNav.map(renderNavItem)}
             </div>
           </SidebarBody>
@@ -619,6 +686,7 @@ function AppContent() {
                       onNavigateToMemory={handleSelectMemory}
                       onNavigateToChat={handleSelectChat}
                       onNavigateToEntity={handleSelectEntity}
+                      onSeekReplay={(ts) => { setReplayTarget(ts || Date.now()); setViewMode('replay'); }}
                       openTarget={chatTarget}
                       onTargetConsumed={() => setChatTarget(null)}
                     />
@@ -644,6 +712,11 @@ function AppContent() {
                       actionsMode,
                       setActionsMode,
                       searchQuery,
+                      onSearchQueryChange: setSearchQuery,
+                      searchSources,
+                      onSearchSourcesChange: setSearchSources,
+                      searchSort,
+                      onSearchSortChange: setSearchSort,
                       selectedMemoryId,
                       setSelectedMemoryId,
                       rec,

@@ -6,8 +6,10 @@
 // and loop until it answers. Built-in tools only (no network) for now — web
 // search + MCP connectors plug in here later.
 
+import fs from 'fs';
 import { llm } from './llm';
 import { getSetting, saveSetting } from './database';
+import { buildUserContent } from './tool-content';
 
 const PORT = 8439;
 
@@ -168,6 +170,35 @@ const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'search_memory',
+    description:
+      "Search the user's ENTIRE memory — past chats, screen captures, meetings, people, notes, and connected apps (Slack, Gmail, etc.) — for anything relevant. Use this for ANY question about what was said, discussed, or decided, about a PERSON, or to recall past activity (e.g. 'what were Praveen and I talking about', 'my notes on the Q3 launch'). Prefer this over read_screen unless the user explicitly asks what's on screen RIGHT NOW. Fully local.",
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'what to look for, in natural language (e.g. a person + topic)' },
+        limit: { type: 'number', description: 'max results (default 8)' },
+      },
+      required: ['query'],
+    },
+    run: async (a) => {
+      try {
+        const { universalSearch } = await import('./search');
+        const n = Math.min(20, Math.max(1, Number(a.limit) || 8));
+        const hits = await universalSearch(String(a.query ?? ''), { limit: n, semantic: true });
+        if (!hits.length) return 'Nothing found in memory for that.';
+        return hits
+          .map((h) => {
+            const when = h.ts ? ' · ' + new Date(h.ts).toISOString().slice(0, 16).replace('T', ' ') : '';
+            return `(${h.surface || h.kind}${when}) ${h.title ? h.title + ' — ' : ''}${h.snippet}`;
+          })
+          .join('\n');
+      } catch (e) {
+        return 'Error searching memory: ' + (e as Error).message;
+      }
+    },
+  },
+  {
     name: 'get_datetime',
     description: 'Get the current local date and time.',
     parameters: { type: 'object', properties: {} },
@@ -213,13 +244,16 @@ export function getToolExtensions(): ToolExtension[] {
 }
 
 export type ToolCall = { name: string; args: Record<string, unknown>; result: string };
+// Structured sources surfaced by search_memory so the chat can render them as
+// interactive citation cards (thumbnail + open-in-Replay), same as the RAG path.
+export type UnifiedSource = { key: string; kind: string; refId: number; title: string; snippet: string; surface: string; ts: number; imagePath: string | null };
 
 /** Run a chat turn with tool-calling. Returns the final answer + the calls made. */
 export async function toolChat(
   query: string,
   history: { role: string; content: string }[] = [],
-  opts: { connectors?: boolean } = {},
-): Promise<{ answer: string; toolCalls: ToolCall[] }> {
+  opts: { connectors?: boolean; conversationId?: string; images?: string[] } = {},
+): Promise<{ answer: string; toolCalls: ToolCall[]; unified: UnifiedSource[] }> {
   await llm.init(); // respects pause; ensures the server is up
 
   // Opt-in: pull in tools from registered pro extensions (e.g. MCP connectors)
@@ -242,13 +276,25 @@ export async function toolChat(
   const sys = 'You are Off Grid, a private on-device assistant. Use the provided tools when they help answer precisely. Keep answers concise.'
     + (hints.length ? ' ' + hints.join(' ') : '');
 
+  // Attached images ride on the current user turn so the vision model can read
+  // them even in tools/connectors mode (otherwise they were silently dropped).
+  const imageDataUrls: string[] = [];
+  for (const p of opts.images ?? []) {
+    try {
+      const base64 = fs.readFileSync(p).toString('base64');
+      const mime = p.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+      imageDataUrls.push(`data:${mime};base64,${base64}`);
+    } catch (e) { console.error('[tools] failed to read image', p, e); }
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const messages: any[] = [
     { role: 'system', content: sys },
     ...history.slice(-10).map((m) => ({ role: m.role, content: m.content })),
-    { role: 'user', content: query },
+    { role: 'user', content: buildUserContent(query, imageDataUrls) },
   ];
   const toolCalls: ToolCall[] = [];
+  const unified: UnifiedSource[] = [];
+  const unifiedKeys = new Set<string>();
 
   for (let step = 0; step < 5; step++) {
     const res = await fetch(`http://127.0.0.1:${PORT}/v1/chat/completions`, {
@@ -267,18 +313,41 @@ export async function toolChat(
       for (const c of calls) {
         let args: Record<string, unknown> = {};
         try { args = JSON.parse(c.function.arguments || '{}'); } catch { /* keep empty */ }
-        const ext = exts.find((e) => e.canHandle(c.function.name));
-        const result = ext
-          ? await ext.execute(c.function.name, args)
-          : await execute(c.function.name, args);
+        let result: string;
+        if (c.function.name === 'search_memory') {
+          // Run memory search here (not via the generic tool) so we can both build
+          // the model's text result AND surface the structured hits as interactive
+          // citations — excluding the current conversation so it can't cite itself.
+          try {
+            const { universalSearch } = await import('./search');
+            const n = Math.min(20, Math.max(1, Number(args.limit) || 8));
+            const hits = await universalSearch(String(args.query ?? ''), { limit: n, semantic: true, excludeChatId: opts.conversationId });
+            for (const h of hits) {
+              if (unifiedKeys.has(h.key)) continue;
+              unifiedKeys.add(h.key);
+              unified.push({ key: h.key, kind: h.kind, refId: h.refId, title: h.title, snippet: h.snippet, surface: h.surface, ts: h.ts, imagePath: h.imagePath });
+            }
+            result = hits.length
+              ? hits.map((h) => {
+                  const when = h.ts ? ' · ' + new Date(h.ts).toISOString().slice(0, 16).replace('T', ' ') : '';
+                  return `(${h.surface || h.kind}${when}) ${h.title ? h.title + ' — ' : ''}${h.snippet}`;
+                }).join('\n')
+              : 'Nothing found in memory for that.';
+          } catch (e) {
+            result = 'Error searching memory: ' + (e as Error).message;
+          }
+        } else {
+          const ext = exts.find((e) => e.canHandle(c.function.name));
+          result = ext ? await ext.execute(c.function.name, args) : await execute(c.function.name, args);
+        }
         toolCalls.push({ name: c.function.name, args, result });
         messages.push({ role: 'tool', tool_call_id: c.id, content: result });
       }
       continue; // let the model use the results
     }
-    return { answer: (msg.content || '').trim(), toolCalls };
+    return { answer: (msg.content || '').trim(), toolCalls, unified };
   }
-  return { answer: 'Stopped after too many tool steps.', toolCalls };
+  return { answer: 'Stopped after too many tool steps.', toolCalls, unified };
 }
 
 /** Names + descriptions + enabled state of all tools (for the settings UI). */

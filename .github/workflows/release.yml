@@ -12,14 +12,14 @@ concurrency:
   group: release
   cancel-in-progress: false
 
-# macOS-only for now: core (free) + pro, both Developer-ID signed + notarized.
-# Pro source lives in the separate private repo off-grid-ai/desktop-pro (gitignored
-# here), cloned into pro/ at build time via the PRO_REPO_TOKEN secret. Windows is
-# parked (bundled llama-server fix owned elsewhere) — re-add a windows-2022 job when
-# it lands.
+# macOS-only for now. ONE signed + notarized DMG: the build bundles the private pro
+# source (cloned from off-grid-ai/desktop-pro) and is license-gated at runtime —
+# free = unlicensed (pro tabs locked), a valid Keygen key unlocks in place (no
+# re-download). The ASAR integrity fuse (electron-builder.yml) makes a tampered
+# app.asar refuse to load — our local-first anti-tamper lever (we don't phone home).
+# Actions are pinned to commit SHAs. Windows is parked.
 jobs:
-  # Bump the version once (on Ubuntu) and push it, so every build job builds the
-  # same version. [skip ci] keeps it from re-triggering.
+  # Bump the version once and push it so the build job builds that exact commit.
   version:
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     runs-on: ubuntu-latest
@@ -27,11 +27,11 @@ jobs:
       version: ${{ steps.bump.outputs.version }}
       sha: ${{ steps.bump.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
       - name: Bump patch version
@@ -45,102 +45,61 @@ jobs:
           git add package.json package-lock.json
           git commit -m "chore: bump version to $VERSION [skip ci]"
           git push
-          # Pin the build to THIS exact commit, not floating main — otherwise a
-          # concurrent push's bump can advance main and the build publishes a
-          # mismatched/duplicate release (the version race that tangled v0.0.20/.21).
+          # Pin the build to THIS exact commit, not floating main (avoids the
+          # concurrent-bump version race).
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-  # CORE (free) build: OFFGRID_FORCE_CORE=1 makes the build ignore any pro/ that might
-  # be present → __OFFGRID_PRO__ false (in CI pro/ isn't there anyway; belt-and-braces).
-  # Publishes to the default update channel (latest-mac.yml).
-  build-mac-core:
+  # Single build: pro code bundled, license-gated. Publishes to the default update
+  # channel (latest-mac.yml).
+  build-mac:
     needs: version
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ needs.version.outputs.sha }} # the exact bumped commit, not floating main
+          ref: ${{ needs.version.outputs.sha }} # the exact bumped commit
           fetch-depth: 0
           lfs: true # resources/bin/* (llama-server, sd-cli, whisper, ffmpeg, dylibs)
-                    # are Git LFS — without this, CI bundles 131-byte pointer stubs
-                    # and every runtime spawn fails with ENOEXEC.
+                    # are Git LFS — without this CI bundles pointer stubs and every
+                    # runtime spawn fails with ENOEXEC.
       - name: Pull LFS binaries
         run: git lfs pull
-      - uses: actions/setup-node@v4
+      # Private pro source into pro/ → __OFFGRID_PRO__ true. The checkout action
+      # injects the token as an http.extraheader (never in a clone URL) and scrubs
+      # it afterwards — safer than embedding ${TOKEN} in a git URL.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: off-grid-ai/desktop-pro
+          token: ${{ secrets.PRO_REPO_TOKEN }}
+          path: pro
+          fetch-depth: 1
+      - name: Drop nested .git from pro/
+        run: rm -rf pro/.git # don't nest a repo inside the build tree
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
           cache: 'npm'
       - name: Install dependencies
         run: npm ci
-      - name: Build (typecheck + bundle) — CORE
-        env:
-          OFFGRID_FORCE_CORE: '1'
+      - name: Build (typecheck + bundle)
         run: npm run build
-      - name: Package & publish CORE (signed + notarized)
+      - name: Package, sign, notarize & publish (DMG + auto-update metadata)
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # notarytool needs the API key as a file; write it from the secret.
           printf '%s' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/AuthKey.p8"
           export APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
+          # ONE signed + notarized build, published to the default update channel
+          # (the flow that shipped 0.0.22–0.0.24). electron-builder uploads the DMG
+          # (human download) plus the zip + latest-mac.yml + blockmap that
+          # electron-updater needs, so existing users keep auto-updating.
           npx electron-builder --mac \
-            -c.productName="Off Grid AI" \
-            -c.appId="co.getoffgridai.desktop" \
-            -c.dmg.artifactName='OffGrid-core-${version}.${ext}' \
-            --publish always
-
-  # PRO build: clone the private pro source into pro/ → __OFFGRID_PRO__ true. Pro is
-  # license-gated at runtime (a leaked DMG is inert without a valid Keygen key), so
-  # publishing it publicly is safe. Publishes to a SEPARATE update channel (pro-mac.yml)
-  # so core and pro auto-updates never feed each other the wrong binary.
-  build-mac-pro:
-    needs: version
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.version.outputs.sha }}
-          fetch-depth: 0
-          lfs: true
-      - name: Pull LFS binaries
-        run: git lfs pull
-      - name: Clone private pro source into pro/
-        env:
-          PRO_REPO_TOKEN: ${{ secrets.PRO_REPO_TOKEN }}
-        run: |
-          rm -rf pro
-          git clone --depth 1 \
-            "https://x-access-token:${PRO_REPO_TOKEN}@github.com/off-grid-ai/desktop-pro.git" pro
-          rm -rf pro/.git # don't nest a repo inside the build tree
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-      - name: Install dependencies
-        run: npm ci
-      - name: Build (typecheck + bundle) — PRO
-        run: npm run build
-      - name: Package & publish PRO (signed + notarized, pro channel)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          printf '%s' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/AuthKey.p8"
-          export APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
-          npx electron-builder --mac \
-            -c.productName="Off Grid AI Pro" \
-            -c.appId="co.getoffgridai.desktop.pro" \
-            -c.dmg.artifactName='OffGrid-pro-${version}.${ext}' \
-            -c.publish.channel=pro \
+            -c.dmg.artifactName='OffGrid-${version}.${ext}' \
             --publish always

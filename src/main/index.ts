@@ -1,6 +1,5 @@
-import { app, shell, BrowserWindow, protocol, net, session, desktopCapturer, screen } from 'electron'
+import { app, shell, BrowserWindow, protocol, session, desktopCapturer, screen } from 'electron'
 import { join } from 'path'
-import { pathToFileURL } from 'url'
 import fs from 'fs'
 
 // Custom scheme to serve local capture screenshots to the renderer (file:// is
@@ -14,6 +13,9 @@ import { setupIPC } from './ipc' // IMPORT FROM IPC ONLY
 import { setupRagIPC } from './rag-ipc'
 import { setupMcpIpc } from './mcp-ipc'
 import { startModelServer } from './model-server'
+import { startMediaServer, mediaUrlFor } from './media-server'
+import { isPathAllowed } from './media-range'
+import { ipcMain } from 'electron'
 import { loadProFeaturesMain } from './bootstrap/loadProFeaturesMain'
 import { initLicensing } from './licensing/license-service'
 import { setupLicenseIpc } from './license-ipc'
@@ -79,7 +81,8 @@ function createWindow(): void {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false, // REQUIRED for IPC
-      contextIsolation: true
+      contextIsolation: true,
+      plugins: true // Chromium's built-in PDF viewer (chat attachment viewer) needs this
     }
   })
 
@@ -158,19 +161,76 @@ app.whenReady().then(() => {
   }
 
   // Serve local capture screenshots + entity photos + meeting videos to the
-  // renderer. Delegate to Electron's native file handler (net.fetch on a file://
-  // URL) — it implements HTTP range/seek for large media correctly, which the
-  // hand-rolled stream did not (long recordings would stall or jump to the end).
+  // renderer (file:// is blocked there). We answer HTTP Range ourselves so <video>
+  // can seek large recordings: a Range request gets 206 + Content-Range; a plain
+  // request gets 200 + Accept-Ranges so the player learns it can seek.
+  //
+  // The subtle part: on every seek the player CANCELS the in-flight body. We must
+  // tear the file stream down SILENTLY — never call controller.error/close after a
+  // cancel — otherwise Chromium treats the seek as a failed load and resets to 0:00.
+  // (net.fetch(file://) sidesteps this but doesn't honour Range, so seeking is dead.)
+  const OGCAPTURE_MIME: Record<string, string> = {
+    mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm',
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif',
+    mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', aac: 'audio/aac', ogg: 'audio/ogg',
+  };
+  const fileStreamToWeb = (rs: fs.ReadStream): ReadableStream<Uint8Array> => {
+    let done = false;
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        rs.on('data', (chunk: string | Buffer) => {
+          if (done) return;
+          controller.enqueue(typeof chunk === 'string' ? new TextEncoder().encode(chunk) : new Uint8Array(chunk));
+          if ((controller.desiredSize ?? 1) <= 0) rs.pause();
+        });
+        rs.on('end', () => { if (!done) { done = true; try { controller.close(); } catch { /* closed */ } } });
+        rs.on('error', (err) => { if (!done) { done = true; try { controller.error(err); } catch { /* errored */ } } });
+      },
+      pull() { if (!done) rs.resume(); },
+      // Player cancelled (seek / teardown): kill the fd quietly, NEVER touch the controller.
+      cancel() { done = true; rs.destroy(); },
+    });
+  };
+  // Only serve files inside the app's own media dirs — this scheme is reachable
+  // from the renderer, so serving an arbitrary decoded path would be a local-file
+  // read primitive. isPathAllowed is symlink-safe (canonicalizes both sides).
+  const ogCaptureRoots = ['meetings', 'uploads', 'captures', 'entity-photos'].map((d) =>
+    join(app.getPath('userData'), d),
+  );
   protocol.handle('ogcapture', async (request) => {
     const p = decodeURIComponent(request.url.slice('ogcapture://'.length));
-    const range = request.headers.get('Range');
+    if (!isPathAllowed(p, ogCaptureRoots)) {
+      return new Response(null, { status: 403 });
+    }
     try {
-      const fileUrl = pathToFileURL(p).toString();
-      const headers = new Headers();
-      if (range) headers.set('Range', range);
-      const resp = await net.fetch(fileUrl, { headers });
-      console.log(`[ogcapture] ${p.split('/').pop()} range=${range || '(full)'} -> ${resp.status} cr=${resp.headers.get('content-range') || '-'} ct=${resp.headers.get('content-type') || '-'} len=${resp.headers.get('content-length') || '-'}`);
-      return resp;
+      const stat = await fs.promises.stat(p);
+      const size = stat.size;
+      const ext = p.split('.').pop()?.toLowerCase() ?? '';
+      const type = OGCAPTURE_MIME[ext] ?? 'application/octet-stream';
+      const range = request.headers.get('Range');
+      const m = range && /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+      if (m && (m[1] || m[2])) {
+        const start = m[1] ? parseInt(m[1], 10) : Math.max(0, size - parseInt(m[2], 10));
+        const end = m[1] && m[2] ? Math.min(parseInt(m[2], 10), size - 1) : size - 1;
+        if (start >= size || start > end) {
+          return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
+        }
+        const rs = fs.createReadStream(p, { start, end });
+        return new Response(fileStreamToWeb(rs), {
+          status: 206,
+          headers: {
+            'Content-Type': type,
+            'Content-Length': String(end - start + 1),
+            'Content-Range': `bytes ${start}-${end}/${size}`,
+            'Accept-Ranges': 'bytes',
+          },
+        });
+      }
+      const rs = fs.createReadStream(p);
+      return new Response(fileStreamToWeb(rs), {
+        status: 200,
+        headers: { 'Content-Type': type, 'Content-Length': String(size), 'Accept-Ranges': 'bytes' },
+      });
     } catch (e) {
       console.error('[ogcapture] serve failed for', p, e);
       return new Response(null, { status: 404 });
@@ -250,6 +310,9 @@ app.whenReady().then(() => {
      setupRagIPC();
      setupMcpIpc(); // basic MCP connectors (management + chat tool extension)
      startModelServer(); // one OpenAI-compatible local gateway on :7878 (LLM + STT)
+     startMediaServer(); // loopback HTTP for seekable local media (meeting videos)
+     ipcMain.handle('media:url', (_e, absPath: string) => mediaUrlFor(absPath));
+     // (clipboard is now a pro feature — setupClipboard runs in pro's activateMain)
      // Pro features (capture, CRM, meetings, connectors, secretary, proactive,
      // skills engine, console, tray) register their own IPC + intervals + watchers
      // here. No-op in the free build (the pro submodule is absent → stub).

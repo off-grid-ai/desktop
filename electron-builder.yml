@@ -1,4 +1,6 @@
-appId: co.getoffgridai.desktop
+# Single build is the pro-capable one (license-gated). Keep the `.pro` bundle id so
+# existing Pro installs auto-update into it (bundle id + granted TCC permissions match).
+appId: co.getoffgridai.desktop.pro
 productName: Off Grid AI
 copyright: © Off Grid AI
 directories:
@@ -29,6 +31,12 @@ nsis:
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
+  # DMG is the human download; the zip + latest-mac.yml (generated for the zip)
+  # are what electron-updater needs, so auto-update keeps working. One build, one
+  # update channel — no core/pro split, no arch variants to confuse anyone.
+  target:
+    - dmg
+    - zip
   category: public.app-category.productivity
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
@@ -56,8 +64,17 @@ linux:
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
+# Electron fuses (flipped at package time). ASAR integrity makes a tampered app.asar
+# refuse to load — the local-first anti-tamper lever (we don't phone home, so this is
+# the bar against cracking the offline license check). Only the integrity fuses are
+# set: we deliberately leave runAsNode ENABLED because TTS spawns process.execPath as
+# a Node worker (disabling it would break on-device voice).
+electronFuses:
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
 publish:
   provider: github
   owner: off-grid-ai
   repo: desktop
+  # Publish (not draft) so electron-updater on installed apps sees the release.
   releaseType: release

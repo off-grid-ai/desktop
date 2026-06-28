@@ -1,0 +1,317 @@
+// Unified setup + system-health surface. Two jobs:
+//   1. getSystemHealth() — one aggregated snapshot of every local component
+//      (chat LLM / gateway / vision / embeddings / STT / TTS / image gen) so the
+//      Settings → Health panel can show what's running at a glance.
+//   2. autoConfigure() — the "Configure for me" action: pick a model that fits
+//      this machine's RAM, download it, activate it, start llama-server, verify.
+//
+// Everything here is on-device; no network except the model download itself.
+import os from 'os';
+import * as http from 'http';
+import { llm } from './llm';
+import { getActiveModel, downloadModel, listInstalled, setActiveModel, setActiveModalChoice } from './models-manager';
+
+export type ComponentStatus = 'ready' | 'starting' | 'down' | 'not_installed';
+
+export interface HealthComponent {
+  id: string;
+  label: string;
+  status: ComponentStatus;
+  detail?: string;
+  port?: number;
+  /** True if the renderer can offer a "restart" affordance for this component. */
+  canRestart?: boolean;
+}
+
+export interface SystemHealth {
+  ramGb: number;
+  activeModel: string | null;
+  components: HealthComponent[];
+}
+
+export interface SetupProgress {
+  phase: 'select' | 'download' | 'activate' | 'start' | 'verify' | 'done' | 'error';
+  message: string;
+  modelId?: string;
+  modelName?: string;
+  percent?: number;
+  downloadedMB?: string;
+  totalMB?: string;
+}
+export type SetupProgressCb = (p: SetupProgress) => void;
+
+const LLAMA_PORT = 8439;
+const GATEWAY_PORT = 7878;
+
+/** GET a localhost endpoint, parse JSON, with a short timeout. null on any failure. */
+function pingJson(port: number, path = '/health', timeoutMs = 1500): Promise<unknown | null> {
+  return new Promise((resolve) => {
+    const req = http.get({ host: '127.0.0.1', port, path, timeout: timeoutMs }, (res) => {
+      if (!res.statusCode || res.statusCode >= 400) { res.resume(); resolve(null); return; }
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve(body ? {} : null); } });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
+}
+
+function ramGb(): number {
+  return Math.round(os.totalmem() / 1e9);
+}
+
+/** One aggregated snapshot of every local component. */
+export async function getSystemHealth(): Promise<SystemHealth> {
+  const activeModel = getActiveModel();
+  const modelsExist = llm.modelsExist();
+
+  // Live probes (run in parallel): the chat server and the gateway.
+  const [llamaHealth, gatewayHealth] = await Promise.all([
+    pingJson(LLAMA_PORT),
+    pingJson(GATEWAY_PORT),
+  ]);
+
+  // Image generation is checked in-process (no HTTP) so it works even if the
+  // gateway is down.
+  let image: { available: boolean; reason?: string } = { available: false };
+  try {
+    const { imageGenStatus } = await import('./imagegen');
+    const s = imageGenStatus();
+    image = { available: s.available, reason: s.reason };
+  } catch { /* imagegen unavailable */ }
+
+  const gw = (gatewayHealth ?? {}) as { modalities?: Record<string, string> };
+  const modality = (k: string): ComponentStatus => {
+    if (!gatewayHealth) return 'down';
+    const v = gw.modalities?.[k];
+    return v === 'ready' ? 'ready' : v === 'not_installed' ? 'not_installed' : 'down';
+  };
+
+  // Chat LLM (llama-server). ready = /health answers. starting = a model is
+  // present and we've kicked off init but it isn't answering yet. not_installed =
+  // no model on disk. down = model present but server isn't coming up.
+  let chat: ComponentStatus;
+  let chatDetail: string | undefined;
+  if (llamaHealth) { chat = 'ready'; chatDetail = activeModel ?? undefined; }
+  else if (!modelsExist) { chat = 'not_installed'; chatDetail = 'No model installed'; }
+  else if (llm.isReady()) { chat = 'starting'; chatDetail = 'Warming up…'; }
+  else { chat = 'down'; chatDetail = 'Model installed but server is not running'; }
+
+  const components: HealthComponent[] = [
+    { id: 'chat', label: 'Chat model (llama-server)', status: chat, detail: chatDetail, port: LLAMA_PORT, canRestart: modelsExist },
+    { id: 'gateway', label: 'Local gateway', status: gatewayHealth ? 'ready' : 'down', detail: gatewayHealth ? 'OpenAI-compatible API' : 'Not responding', port: GATEWAY_PORT, canRestart: true },
+    { id: 'vision', label: 'Vision (image understanding)', status: modality('vision_understanding') },
+    { id: 'embeddings', label: 'Embeddings (search/RAG)', status: modality('embeddings') },
+    { id: 'transcription', label: 'Speech-to-text (whisper)', status: modality('transcription') },
+    { id: 'speech', label: 'Text-to-speech', status: modality('speech') },
+    {
+      id: 'image',
+      label: 'Image generation',
+      status: image.available ? 'ready' : 'not_installed',
+      detail: image.available ? undefined : (image.reason ?? 'No image model installed'),
+    },
+  ];
+
+  return { ramGb: ramGb(), activeModel, components };
+}
+
+/** Choose the best chat/vision model that fits this machine's RAM. Prefers a
+ *  vision model (so chat supports images) at the largest size the RAM tier
+ *  allows; falls back to text, then to a safe small default. */
+export type RecMode = 'conservative' | 'balanced' | 'extreme';
+
+export async function recommendChatModel(modeOverride?: RecMode): Promise<{ id: string; name: string } | null> {
+  const { CATALOG, recommendForRam } = await import('@offgrid/models');
+  const { chooseChatModel, recommendedParamCeiling, preferredModelIds, totalBytes } = await import('./model-sizing');
+  const gb = ramGb();
+  const tier = recommendForRam(gb);
+  let mode: RecMode = 'balanced';
+  if (modeOverride) mode = modeOverride;
+  else try {
+    const m = (llm.getSettings() as { performanceMode?: string }).performanceMode;
+    if (m === 'conservative' || m === 'extreme') mode = m;
+  } catch { /* default */ }
+  const frac = mode === 'conservative' ? 0.30 : mode === 'extreme' ? 0.55 : 0.38;
+  const budget = gb * frac * 1e9;
+  // 1) Curated default for the tier (16GB → Gemma 4 E2B), if it fits the budget.
+  for (const id of preferredModelIds(gb, mode)) {
+    const e = CATALOG.find((m) => m.id === id);
+    if (e && totalBytes(e as never) <= budget) return { id: e.id, name: e.name };
+  }
+  // 2) Otherwise the size heuristic, capped by recommended params (8B only ≥24GB).
+  const maxParams = Math.min(tier.maxParams, recommendedParamCeiling(gb, mode));
+  const pick = chooseChatModel(CATALOG as never, gb, maxParams, frac) as { id: string; name: string } | null;
+  return pick ? { id: pick.id, name: pick.name } : null;
+}
+
+export interface FitEstimate {
+  level: 'ok' | 'tight' | 'risky';
+  ramGb: number;
+  weightsGb: number;
+  message: string;
+}
+
+/** Estimate whether a model fits this machine's RAM comfortably, for a pre-activate
+ *  warning. 'ok' = plenty of headroom; 'tight' = works but context will be reduced;
+ *  'risky' = weights alone are a large fraction of RAM (slow / may fail to load). */
+export async function estimateModelFit(modelId: string): Promise<FitEstimate> {
+  const gb = ramGb();
+  try {
+    const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models');
+    const entry = CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId));
+    const { fitLevel } = await import('./model-sizing');
+    const weightsGb = (entry?.files?.reduce((s: number, f: { sizeBytes?: number }) => s + (f.sizeBytes ?? 0), 0) ?? 0) / 1e9;
+    if (!weightsGb) return { level: 'ok', ramGb: gb, weightsGb: 0, message: '' };
+    const level: FitEstimate['level'] = fitLevel(weightsGb, gb);
+    const message =
+      level === 'ok'
+        ? ''
+        : level === 'tight'
+          ? `This model's weights are ~${weightsGb.toFixed(1)} GB of your ${gb} GB. It'll run, but its context window will be reduced to stay within memory.`
+          : `This model's weights are ~${weightsGb.toFixed(1)} GB on a ${gb} GB machine — it may run slowly, use heavy swap, or fail to load. Context will be heavily reduced. Consider a smaller model.`;
+    return { level, ramGb: gb, weightsGb, message };
+  } catch {
+    return { level: 'ok', ramGb: gb, weightsGb: 0, message: '' };
+  }
+}
+
+export interface Recommendation { id: string; name: string; sizeGb: number; ramGb: number; installed: boolean; mode: RecMode }
+
+/** Preview what "Configure for me" would pick for a given mode (no side effects),
+ *  so the setup UI can show the exact model + size before the user commits. */
+export async function getRecommendation(mode?: RecMode): Promise<Recommendation | null> {
+  const pick = await recommendChatModel(mode);
+  if (!pick) return null;
+  const { CATALOG } = await import('@offgrid/models');
+  const entry = CATALOG.find((m) => m.id === pick.id);
+  const sizeGb = (entry?.files?.reduce((s: number, f: { sizeBytes?: number }) => s + (f.sizeBytes ?? 0), 0) ?? 0) / 1e9;
+  let installed = false;
+  try { installed = (await listInstalled()).includes(pick.id); } catch { /* ignore */ }
+  const effMode: RecMode = mode ?? ((): RecMode => {
+    try { const m = (llm.getSettings() as { performanceMode?: string }).performanceMode; return m === 'conservative' || m === 'extreme' ? m : 'balanced'; } catch { return 'balanced'; }
+  })();
+  return { id: pick.id, name: pick.name, sizeGb, ramGb: ramGb(), installed, mode: effMode };
+}
+
+// The non-chat models "Configure for me" also sets up. Binaries (whisper, sd-cli,
+// the TTS runtime) ship in the app; only these MODELS download. Image is heavy
+// (~4GB), so it's skipped in Conservative to keep that mode genuinely light.
+// Whisper has real size tiers, so it scales with the mode (tiny → base → small).
+// TTS (Kokoro 82M) is already tiny and the only quality option, so it stays fixed.
+const STT_MODEL_BY_MODE: Record<RecMode, string> = {
+  conservative: 'ggerganov/whisper.cpp/tiny',   // ~78MB
+  balanced: 'ggerganov/whisper.cpp/base',        // ~148MB
+  extreme: 'ggerganov/whisper.cpp/small',        // ~488MB
+};
+const TTS_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX';   // text-to-speech, ~82M
+const IMAGE_MODEL_ID = 'offgrid-ai/juggernaut-xl-v9-GGUF';    // image gen, ~4.35GB
+
+export type SetupItemKind = 'chat' | 'transcription' | 'voice' | 'image';
+export interface SetupItem {
+  kind: SetupItemKind;
+  capability: string;   // user-facing: "Chat & vision", "Speech-to-text", …
+  id: string;
+  name: string;
+  sizeGb: number;
+  installed: boolean;
+  required: boolean;    // chat is required; the rest are best-effort extras
+}
+export interface SetupPlan { mode: RecMode; ramGb: number; items: SetupItem[]; totalDownloadGb: number }
+
+/** The full set of models "Configure for me" will set up for a mode: the chat/vision
+ *  model plus speech-to-text, text-to-speech, and (outside Conservative) image. Pure
+ *  preview — no downloads — so the UI can list everything before the user commits.
+ *  autoConfigure() consumes the same plan, so the preview and the action never drift. */
+export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
+  const effMode: RecMode = mode ?? ((): RecMode => {
+    try { const m = (llm.getSettings() as { performanceMode?: string }).performanceMode; return m === 'conservative' || m === 'extreme' ? m : 'balanced'; } catch { return 'balanced'; }
+  })();
+  const { CATALOG } = await import('@offgrid/models');
+  let installed: string[] = [];
+  try { installed = await listInstalled(); } catch { /* ignore */ }
+  const sizeOf = (id: string): number => {
+    const e = CATALOG.find((m) => m.id === id);
+    return (e?.files?.reduce((s: number, f: { sizeBytes?: number }) => s + (f.sizeBytes ?? 0), 0) ?? 0) / 1e9;
+  };
+  const nameOf = (id: string, fallback: string): string => CATALOG.find((m) => m.id === id)?.name ?? fallback;
+
+  const items: SetupItem[] = [];
+  const chat = await recommendChatModel(effMode);
+  if (chat) items.push({ kind: 'chat', capability: 'Chat & vision', id: chat.id, name: chat.name, sizeGb: sizeOf(chat.id), installed: installed.includes(chat.id), required: true });
+  const sttId = STT_MODEL_BY_MODE[effMode];
+  items.push({ kind: 'transcription', capability: 'Speech-to-text', id: sttId, name: nameOf(sttId, 'Whisper'), sizeGb: sizeOf(sttId), installed: installed.includes(sttId), required: false });
+  items.push({ kind: 'voice', capability: 'Text-to-speech', id: TTS_MODEL_ID, name: nameOf(TTS_MODEL_ID, 'Kokoro TTS'), sizeGb: sizeOf(TTS_MODEL_ID), installed: installed.includes(TTS_MODEL_ID), required: false });
+  if (effMode !== 'conservative') items.push({ kind: 'image', capability: 'Image generation', id: IMAGE_MODEL_ID, name: nameOf(IMAGE_MODEL_ID, 'Juggernaut XL v9'), sizeGb: sizeOf(IMAGE_MODEL_ID), installed: installed.includes(IMAGE_MODEL_ID), required: false });
+
+  const totalDownloadGb = items.filter((i) => !i.installed).reduce((s, i) => s + i.sizeGb, 0);
+  return { mode: effMode, ramGb: ramGb(), items, totalDownloadGb };
+}
+
+/** "Configure for me": pick → download (if needed) → activate → start → verify. */
+export async function autoConfigure(onProgress?: SetupProgressCb): Promise<{ success: boolean; error?: string; modelId?: string; modelName?: string }> {
+  const emit = (p: SetupProgress): void => { try { onProgress?.(p); } catch { /* ignore */ } };
+
+  emit({ phase: 'select', message: 'Picking a model that fits your Mac…' });
+  const model = await recommendChatModel();
+  if (!model) { emit({ phase: 'error', message: 'No suitable model found.' }); return { success: false, error: 'no suitable model found' }; }
+
+  const installed = await listInstalled();
+  if (!installed.includes(model.id)) {
+    emit({ phase: 'download', message: `Downloading ${model.name}…`, modelId: model.id, modelName: model.name, percent: 0 });
+    const res = await downloadModel(model.id, (p) =>
+      emit({
+        phase: 'download',
+        message: `Downloading ${model.name}…`,
+        modelId: model.id,
+        modelName: model.name,
+        percent: p.percent,
+        downloadedMB: p.downloadedMB,
+        totalMB: p.totalMB,
+      }),
+    );
+    if (!res.success) { emit({ phase: 'error', message: res.error ?? 'Download failed.', modelId: model.id }); return { success: false, error: res.error, modelId: model.id }; }
+  }
+
+  emit({ phase: 'activate', message: `Activating ${model.name}…`, modelId: model.id, modelName: model.name });
+  const act = await setActiveModel(model.id);
+  if (!act.success) { emit({ phase: 'error', message: act.error ?? 'Activation failed.', modelId: model.id }); return { success: false, error: act.error, modelId: model.id }; }
+
+  emit({ phase: 'start', message: 'Starting the local model server…', modelId: model.id, modelName: model.name });
+  try {
+    await llm.restart();
+  } catch (e) {
+    emit({ phase: 'error', message: (e as Error).message, modelId: model.id });
+    return { success: false, error: (e as Error).message, modelId: model.id };
+  }
+
+  emit({ phase: 'verify', message: 'Verifying…', modelId: model.id, modelName: model.name });
+  const ok = !!(await pingJson(LLAMA_PORT, '/health', 3000));
+
+  // Chat is live — now set up the rest of the baseline (speech-to-text, text-to-
+  // speech, and image outside Conservative). These are best-effort: a failure here
+  // never fails setup, and the chat model being ready already lets the user in.
+  try {
+    const plan = await getSetupPlan();
+    const extras = plan.items.filter((i) => !i.required);
+    const installedNow = await listInstalled();
+    for (const ex of extras) {
+      if (installedNow.includes(ex.id)) { try { await setActiveModalChoice(ex.kind, ex.id); } catch { /* ignore */ } continue; }
+      try {
+        emit({ phase: 'download', message: `Downloading ${ex.capability} (${ex.name})…`, modelId: ex.id, modelName: ex.name, percent: 0 });
+        const r = await downloadModel(ex.id, (p) =>
+          emit({ phase: 'download', message: `Downloading ${ex.capability} (${ex.name})…`, modelId: ex.id, modelName: ex.name, percent: p.percent, downloadedMB: p.downloadedMB, totalMB: p.totalMB }),
+        );
+        if (r.success) await setActiveModalChoice(ex.kind, ex.id);
+      } catch { /* best-effort extra */ }
+    }
+  } catch { /* extras are optional */ }
+
+  emit({
+    phase: 'done',
+    message: ok ? `Ready — ${model.name} + voice & image are set up.` : `${model.name} installed; the server is still warming up.`,
+    modelId: model.id,
+    modelName: model.name,
+  });
+  return { success: ok, modelId: model.id, modelName: model.name };
+}

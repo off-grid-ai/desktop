@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { LockKey } from '@phosphor-icons/react';
+import { LockKey, X } from '@phosphor-icons/react';
 import { ProgressiveBlur } from './ui/progressive-blur';
+import { SetupPanel } from './setup/SetupPanel';
+import { StoragePanel } from './setup/StoragePanel';
+import { DataPrivacyPanel } from './setup/DataPrivacyPanel';
 
 // A Pro section shown (disabled) in the free build: title + description + a
 // "Pro · July 2026" badge, dimmed and non-interactive.
@@ -77,26 +80,23 @@ function SecretaryPrefs(): React.ReactElement {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const api = (window as any).api;
   const [doc, setDoc] = useState('');
-  const [pending, setPending] = useState(0);
-  const [busy, setBusy] = useState(false);
   const load = (): void => {
-    api.secretaryPrefsGet?.().then((p: { doc?: string; pendingFeedback?: number }) => {
-      setDoc(p?.doc ?? '');
-      setPending(p?.pendingFeedback ?? 0);
-    });
+    api.secretaryPrefsGet?.().then((p: { doc?: string }) => setDoc(p?.doc ?? ''));
   };
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
-  const refresh = async (): Promise<void> => {
-    setBusy(true);
-    try {
-      const r = await api.secretaryPrefsDistill?.();
-      if (r && typeof r.doc === 'string') setDoc(r.doc);
-      load();
-    } finally {
-      setBusy(false);
-    }
+
+  // The doc is distilled by the assistant (auto-refreshes ~hourly). The user's
+  // only manual control is REMOVING individual lines they disagree with — there's
+  // no free-form editing. Always persist as normalized "- " bullet lines.
+  const lines = doc.split('\n').map((l) => l.trim()).filter(Boolean);
+  const toBullets = (ls: string[]): string =>
+    ls.map((l) => l.replace(/^[-•*]\s*/, '').trim()).filter(Boolean).map((t) => `- ${t}`).join('\n');
+  const removeLine = async (idx: number): Promise<void> => {
+    const next = toBullets(lines.filter((_, i) => i !== idx));
+    setDoc(next);
+    await api.secretaryPrefsSet?.(next);
   };
-  const clear = async (): Promise<void> => { await api.secretaryPrefsSet?.(''); setDoc(''); };
+  const clear = async (): Promise<void> => { setDoc(''); await api.secretaryPrefsSet?.(''); };
 
   return (
     <motion.div
@@ -107,134 +107,38 @@ function SecretaryPrefs(): React.ReactElement {
     >
       <h3 className="text-white font-medium text-base mb-1">What Off Grid has learned</h3>
       <p className="text-neutral-500 text-sm mb-4">
-        Preferences distilled from the reasons you give when you dismiss a suggestion. This is the only learned text fed back to the assistant — it refreshes about once an hour, and raw notes are never used directly.
+        Preferences distilled from the reasons you give when you dismiss a suggestion. This is the only learned text fed back to the assistant — it refreshes about once an hour, and raw notes are never used directly. You can remove any line you disagree with.
       </p>
-      {doc ? (
-        <pre className="whitespace-pre-wrap rounded-xl border border-neutral-700/50 bg-neutral-800/40 p-3 font-mono text-sm leading-relaxed text-neutral-300">{doc}</pre>
+      {lines.length ? (
+        <ul className="divide-y divide-neutral-800/60 overflow-hidden rounded-xl border border-neutral-700/50 bg-neutral-800/40">
+          {lines.map((line, i) => (
+            <li key={i} className="group flex items-start gap-2 px-3 py-2">
+              <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-sm leading-relaxed text-neutral-300">{line}</span>
+              <button
+                onClick={() => removeLine(i)}
+                aria-label="Remove this line"
+                title="Remove"
+                className="mt-0.5 shrink-0 rounded p-0.5 text-neutral-600 transition-colors hover:bg-red-500/10 hover:text-red-400"
+              >
+                <X className="h-3.5 w-3.5" weight="bold" />
+              </button>
+            </li>
+          ))}
+        </ul>
       ) : (
         <p className="rounded-xl border border-neutral-700/50 bg-neutral-800/40 p-3 text-sm text-neutral-600">
           Nothing learned yet. When you dismiss a suggestion, tell Off Grid why — it generalizes the useful ones here.
         </p>
       )}
-      <div className="mt-3 flex items-center gap-2">
-        <button onClick={refresh} disabled={busy} className="rounded-lg border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:border-neutral-500 disabled:opacity-50">
-          {busy ? 'Updating…' : `Update now${pending ? ` (${pending} new)` : ''}`}
-        </button>
-        {doc && (
-          <button onClick={clear} className="rounded-lg px-3 py-1.5 text-xs text-neutral-500 hover:text-white">Clear</button>
-        )}
-      </div>
-    </motion.div>
-  );
-}
-
-type ConsoleStatus = Awaited<ReturnType<typeof window.api.consoleStatus>>;
-
-const inputCls =
-  'w-full rounded-xl bg-neutral-950 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 outline-none focus:border-neutral-600';
-const btnCls =
-  'px-4 py-2 rounded-xl bg-neutral-800 border border-neutral-700 text-white text-sm font-medium disabled:opacity-50 hover:bg-neutral-700 transition-colors';
-
-function ConsoleSection() {
-  const [url, setUrl] = useState('');
-  const [token, setToken] = useState('');
-  const [status, setStatus] = useState<ConsoleStatus | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-
-  const refresh = (): void => {
-    window.api.consoleStatus().then(setStatus);
-  };
-  useEffect(refresh, []);
-
-  const connect = async (): Promise<void> => {
-    if (!url.trim() || !token.trim()) return;
-    setBusy(true);
-    setError('');
-    const res = await window.api.consoleEnroll(url.trim(), token.trim());
-    setBusy(false);
-    if (res.enrolled) {
-      setToken('');
-      refresh();
-    } else {
-      setError(res.error || 'enrollment failed');
-    }
-  };
-
-  const disconnect = async (): Promise<void> => {
-    await window.api.consoleDisconnect();
-    refresh();
-  };
-
-  const syncNow = async (): Promise<void> => {
-    setBusy(true);
-    await window.api.consoleSyncNow();
-    setBusy(false);
-    refresh();
-  };
-
-  return (
-    <motion.div
-      className="rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 p-6"
-      initial={{ opacity: 0, filter: 'blur(10px)' }}
-      animate={{ opacity: 1, filter: 'blur(0px)' }}
-      transition={{ duration: 0.6, delay: 0.4 }}
-    >
-      <h3 className="text-white font-medium text-base mb-1">Fleet Console</h3>
-      <p className="text-neutral-500 text-sm mb-4">
-        Optionally enroll this device in an Off Grid Console for org policy, fleet audit, and remote
-        commands. The app stays fully local — this only adds reporting to a console you control.
-      </p>
-
-      {status?.enrolled ? (
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <span className="text-neutral-500">Device</span>
-            <span className="text-neutral-200 font-mono">{status.deviceId}</span>
-            <span className="text-neutral-500">Console</span>
-            <span className="text-neutral-200 truncate">{status.url}</span>
-            <span className="text-neutral-500">Policy version</span>
-            <span className="text-neutral-200">{status.policyVersion ?? '—'}</span>
-            <span className="text-neutral-500">Queued events</span>
-            <span className="text-neutral-200">{status.queued}</span>
-          </div>
-          {status.killed ? (
-            <p className="rounded-lg bg-red-950/50 border border-red-900 px-3 py-2 text-sm text-red-300">
-              Kill switch received from the console.
-            </p>
-          ) : null}
-          <div className="flex gap-2">
-            <button onClick={syncNow} disabled={busy} className={btnCls}>
-              {busy ? 'Syncing…' : 'Sync now'}
-            </button>
-            <button onClick={disconnect} className={btnCls}>
-              Disconnect
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="Console URL — e.g. https://console.yourorg.com"
-            className={inputCls}
-          />
-          <input
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="Enrollment token"
-            className={inputCls}
-          />
-          {error ? <p className="text-sm text-red-400">{error}</p> : null}
-          <button onClick={connect} disabled={busy || !url || !token} className={btnCls}>
-            {busy ? 'Enrolling…' : 'Connect'}
-          </button>
+      {lines.length > 0 && (
+        <div className="mt-3">
+          <button onClick={clear} className="rounded-lg px-3 py-1.5 text-xs text-neutral-500 hover:text-white">Clear all</button>
         </div>
       )}
     </motion.div>
   );
 }
+
 
 export function Settings() {
   // Pro/core aware: the proactive / secretary / fleet-console sections are Pro
@@ -268,30 +172,46 @@ export function Settings() {
   };
 
   return (
-    <div className="relative h-full">
-      <div className="absolute inset-0 overflow-y-auto pb-16">
+    <div className="relative flex h-full flex-col">
+      {/* Fixed header — stays put while the content below scrolls. */}
+      <div className="flex shrink-0 items-center gap-3 border-b border-neutral-800/60 px-1 pb-4">
+        <div className="h-10 w-10 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center">
+          <svg className="w-5 h-5 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </div>
+        <div>
+          <h2 className="text-lg font-semibold text-white">Settings</h2>
+          <p className="text-sm text-neutral-500">{isPro ? 'Who you are, what Off Grid has learned, and your devices' : 'Personalization & automation unlock with Pro'}</p>
+        </div>
+      </div>
+
+      {/* Scrolling content below the fixed header */}
+      <div className="relative flex-1 overflow-y-auto px-1 pt-5 pb-16">
         <motion.div
-          className="flex flex-col gap-6 px-1"
+          className="flex flex-col gap-6"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
         >
-          {/* Header */}
+
+          {/* Setup & health — available in every build. Re-run setup or check
+              what's running at any time. */}
           <motion.div
-            className="flex items-center gap-3"
+            className="rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 p-6"
             initial={{ opacity: 0, filter: 'blur(10px)' }}
             animate={{ opacity: 1, filter: 'blur(0px)' }}
-            transition={{ duration: 0.6, delay: 0.1 }}
+            transition={{ duration: 0.6, delay: 0.13 }}
           >
-            <div className="h-10 w-10 rounded-xl bg-neutral-800 border border-neutral-700 flex items-center justify-center">
-              <svg className="w-5 h-5 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-white">Settings</h2>
-              <p className="text-sm text-neutral-500">{isPro ? 'Who you are, what Off Grid has learned, and your devices' : 'Personalization & automation unlock with Pro'}</p>
+            <h3 className="text-white font-medium text-base mb-1">Setup &amp; health</h3>
+            <p className="text-neutral-500 text-sm mb-4">
+              Set up your local AI in one click, or browse models yourself. The status of every
+              on-device component is shown live below.
+            </p>
+            <SetupPanel />
+            <div className="mt-4">
+              <StoragePanel />
             </div>
           </motion.div>
 
@@ -319,7 +239,20 @@ export function Settings() {
           {/* Pro sections — shown but disabled in the free build. */}
           {isPro ? <ProactiveSection /> : <ProPlaceholder title="Proactive delivery" description="A morning briefing and a heads-up before each meeting — native notifications, even when the window is closed." />}
           {isPro ? <SecretaryPrefs /> : <ProPlaceholder title="What Off Grid has learned" description="Preferences distilled from the suggestions you dismiss, fed back to your assistant so it gets sharper over time." />}
-          {isPro ? <ConsoleSection /> : <ProPlaceholder title="Fleet Console" description="Optionally enroll this device in an Off Grid Console for org policy, fleet audit, and remote commands — fully local." />}
+
+          {/* Data & privacy — one place to delete on-device data. */}
+          <motion.div
+            className="rounded-2xl bg-neutral-900/60 backdrop-blur-sm border border-neutral-800 p-6"
+            initial={{ opacity: 0, filter: 'blur(10px)' }}
+            animate={{ opacity: 1, filter: 'blur(0px)' }}
+            transition={{ duration: 0.6, delay: 0.42 }}
+          >
+            <h3 className="text-white font-medium text-base mb-1">Data &amp; privacy</h3>
+            <p className="text-neutral-500 text-sm mb-4">
+              Everything stays on this device. Delete any of it from here — per category, or all at once.
+            </p>
+            <DataPrivacyPanel />
+          </motion.div>
 
           {/* Version footer — so you always know which build you're on. */}
           <div className="flex items-center justify-center gap-2 pt-2 text-xs text-neutral-600">

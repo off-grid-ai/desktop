@@ -35,6 +35,11 @@ try {
       return () => ipcRenderer.removeListener(channel, sub);
     },
     proOff: (channel: string) => ipcRenderer.removeAllListeners(channel),
+    // Loopback HTTP URL for seekable local media (meeting recordings) — <video>
+    // can't reliably stream large files over the custom protocol, so use real HTTP.
+    getMediaUrl: (absPath: string) => ipcRenderer.invoke('media:url', absPath),
+    // Clipboard manager is a Pro feature: its renderer reaches IPC through the
+    // generic proInvoke / proOn passthrough above (no dedicated namespace here).
     getMemories: (limit: number, appName?: string) => ipcRenderer.invoke('db:get-memories', limit, appName),
     addMemory: (content: string, source?: string) => ipcRenderer.invoke('db:add-memory', content, source),
     searchMemories: (query: string) => ipcRenderer.invoke('db:search-memories', query),
@@ -69,6 +74,7 @@ try {
     // RAG Conversation History
     createRagConversation: (id: string, title?: string, projectId?: string | null) => ipcRenderer.invoke('rag:create-conversation', id, title, projectId),
     getRagConversations: (projectId?: string | null) => ipcRenderer.invoke('rag:get-conversations', projectId),
+    searchRagConversationIds: (query: string) => ipcRenderer.invoke('rag:search-conversation-ids', query),
     setRagConversationProject: (id: string, projectId: string | null) => ipcRenderer.invoke('rag:set-conversation-project', id, projectId),
     getRagConversation: (id: string) => ipcRenderer.invoke('rag:get-conversation', id),
     getRagMessages: (conversationId: string) => ipcRenderer.invoke('rag:get-messages', conversationId),
@@ -148,6 +154,7 @@ try {
     openAccessibilitySettings: () => ipcRenderer.invoke('permissions:open-accessibility-settings'),
     openScreenRecordingSettings: () => ipcRenderer.invoke('permissions:open-screen-recording-settings'),
     getAppVersion: () => ipcRenderer.invoke('app:version'),
+    openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url),
 
     // Model Download APIs
     checkModelStatus: () => ipcRenderer.invoke('model:check-status'),
@@ -175,10 +182,39 @@ try {
       return () => ipcRenderer.removeListener('model:download-progress', subscription)
     },
 
+    // Setup + system health
+    systemHealth: () => ipcRenderer.invoke('system:health'),
+    setupRecommendation: (mode?: string) => ipcRenderer.invoke('setup:recommendation', mode),
+    setupPlan: (mode?: string) => ipcRenderer.invoke('setup:plan', mode),
+    chatVisionAvailable: () => ipcRenderer.invoke('model:chat-vision'),
+    writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
+    autoConfigure: () => ipcRenderer.invoke('setup:auto-configure'),
+    restartComponent: (id: string) => ipcRenderer.invoke('system:restart', id),
+    estimateModelFit: (modelId: string) => ipcRenderer.invoke('system:estimate-fit', modelId),
+
+    // Storage + download manager
+    getStorageInfo: () => ipcRenderer.invoke('models:storage'),
+    deleteOrphans: () => ipcRenderer.invoke('models:delete-orphans'),
+    listDownloads: () => ipcRenderer.invoke('models:downloads'),
+    retryDownload: (modelId: string) => ipcRenderer.invoke('models:retry-download', modelId),
+    clearDownload: (modelId: string) => ipcRenderer.invoke('models:clear-download', modelId),
+    clearDownloads: () => ipcRenderer.invoke('models:clear-downloads'),
+    importLocalModel: () => ipcRenderer.invoke('models:import'),
+
+    // Data & privacy
+    getDataSummary: () => ipcRenderer.invoke('data:summary'),
+    clearDataCategory: (id: string, olderThanDays?: number) => ipcRenderer.invoke('data:clear', id, olderThanDays),
+    deleteAllData: () => ipcRenderer.invoke('data:delete-all'),
+    onSetupProgress: (callback: (data: any) => void) => {
+      const subscription = (_: any, data: any) => callback(data)
+      ipcRenderer.on('setup:progress', subscription)
+      return () => ipcRenderer.removeListener('setup:progress', subscription)
+    },
+
     // --- Agentic tool-calling (built-in tools) ---
     listTools: () => ipcRenderer.invoke('tools:list'),
     setToolEnabled: (name: string, enabled: boolean) => ipcRenderer.invoke('tools:set-enabled', name, enabled),
-    toolChat: (query: string, history?: { role: string; content: string }[], opts?: { connectors?: boolean }) => ipcRenderer.invoke('tools:chat', query, history, opts),
+    toolChat: (query: string, history?: { role: string; content: string }[], opts?: { connectors?: boolean; conversationId?: string; images?: string[] }) => ipcRenderer.invoke('tools:chat', query, history, opts),
 
     // --- LLM inference settings ---
     getLlmSettings: () => ipcRenderer.invoke('llm:get-settings'),
@@ -192,6 +228,7 @@ try {
 
     // --- File attachments → text ---
     processFile: (bytes: ArrayBuffer, name: string) => ipcRenderer.invoke('files:process', bytes, name),
+    fileDataUrl: (path: string) => ipcRenderer.invoke('files:data-url', path),
 
     // --- Skills ---
     listSkills: () => ipcRenderer.invoke('skills:list'),
@@ -276,7 +313,8 @@ try {
       ipcRenderer.invoke('crm:entity-record', entityId, opts),
     crmObservationFrames: (observationId: number) => ipcRenderer.invoke('crm:observation-frames', observationId),
     crmSearch: (query: string, entityId?: number) => ipcRenderer.invoke('crm:search', query, entityId),
-    universalSearch: (query: string, opts?: { limit?: number; semantic?: boolean; sources?: string[] }) =>
+    searchFacets: (query: string) => ipcRenderer.invoke('search:facets', query),
+    universalSearch: (query: string, opts?: { limit?: number; semantic?: boolean; sources?: string[]; sort?: 'relevance' | 'recency' | 'match' }) =>
       ipcRenderer.invoke('search:universal', query, opts),
     searchStatus: () => ipcRenderer.invoke('search:status'),
     searchSources: () => ipcRenderer.invoke('search:sources'),
@@ -359,6 +397,7 @@ try {
     meetingGetState: () => ipcRenderer.invoke('meeting:get-state'),
     meetingList: () => ipcRenderer.invoke('meeting:list'),
     meetingDelete: (id: number) => ipcRenderer.invoke('meeting:delete', id),
+    meetingPlayablePath: (p: string) => ipcRenderer.invoke('meeting:playable-path', p),
     onMeetingDetected: (cb: (platform: string) => void) => {
       const sub = (_e: unknown, platform: string): void => cb(platform);
       ipcRenderer.on('meeting:detected', sub);

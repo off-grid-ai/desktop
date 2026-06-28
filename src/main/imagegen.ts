@@ -284,13 +284,14 @@ function resolveModel(preferred?: string): string | null {
     if (fs.existsSync(path.join(dir, chosen))) return path.join(dir, chosen);
     if (sd.includes(chosen)) return path.join(dir, chosen); // mlx/virtual id
   }
-  // Preference: Z-Image-Turbo (2026 flagship, fast, great quality/byte) >
+  // Preference: Juggernaut XL v9 (default photoreal) > Z-Image-Turbo >
   // SDXL-Lightning > SDXL > SD 2.1 > anything else.
+  const juggernaut = sd.find((f) => /juggernaut/i.test(f));
   const zimage = sd.find((f) => /z[-_]?image/i.test(f));
   const lightning = sd.find((f) => /lightning/i.test(f));
   const xl = sd.find((f) => /sdxl|xl/i.test(f));
   const v21 = sd.find((f) => /v2-1|v2\.1/i.test(f));
-  return path.join(dir, zimage ?? lightning ?? xl ?? v21 ?? sd[0]);
+  return path.join(dir, juggernaut ?? zimage ?? lightning ?? xl ?? v21 ?? sd[0]);
 }
 
 // A general-purpose negative prompt that meaningfully lifts quality when the

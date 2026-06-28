@@ -1,0 +1,67 @@
+# Off Grid AI Desktop — agent guide
+
+This is **Off Grid AI Desktop** — an Electron (macOS) desktop app. The product name is always **"Off Grid AI Desktop"** (never "Off Grid Desktop", "My Memories", etc.) — in window titles, OAuth client names, about screens, everywhere.
+
+## Design — DESKTOP-FIRST, Off Grid brand
+
+Full design doc: **`docs/DESIGN.md`**. The essentials, which OVERRIDE any mobile-first or monochrome assumptions:
+
+- **Desktop-first.** Wide canvas: multi-column layouts, dense lists/tables, side panels, detail screens, hover affordances. Never design mobile-first or for narrow viewports. (The mobile app is a separate product with its own guide.)
+- **Typeface: Menlo** (monospace) everywhere — terminal/brutalist.
+- **Accent: emerald** — `#34D399` (dark) / `#059669` (light). THE accent for primary actions, active states, links, success. (Tailwind `green-500/400` is an acceptable stand-in but prefer the exact tokens.)
+- **Base:** black / `#0A0A0A` + white; neutral grays for surfaces/borders/text tiers. Flat, sharp, dense.
+- Tokens: `@offgrid/design`. Brand canon: `mobile/docs/design/DESIGN_PHILOSOPHY_SYSTEM.md` (brand only — desktop *layout* follows `docs/DESIGN.md`, desktop-first).
+- Real brand logos (Simple Icons), no decorative tiles behind them; no gradients; no emojis in the UI.
+
+## What this app is
+
+A private, **local-first** layer that **sees** (screen capture → OCR → entities), **remembers** (observations/entities/memory), helps you **reflect** (mind-share / day), and **acts** (MCP connectors + approval-gated actions). Everything is processed on-device by a bundled local LLM (llama.cpp + gemma); nothing routes through a server we own.
+
+Roadmap: **`ROADMAP_DESKTOP.md`** (this repo) and `../shared/ROADMAP.md`.
+
+## Stack
+
+Electron 39 + React 19 + Tailwind v4 + electron-vite; better-sqlite3; bundled `llama-server` (port 8439), `whisper.cpp`, `ffmpeg`, `sharp`. Local LLM is a reasoning model — pass `chat_template_kwargs:{enable_thinking:false}` + grammar-constrained `response_format` for structured output. userData dir is `~/Library/Application Support/Off Grid AI Desktop`.
+
+## Conventions
+
+- Verify changes with `npx tsc --noEmit` (main: `tsconfig.node.json`, web: `tsconfig.web.json`) before declaring done.
+- Main-process changes need an app restart; renderer changes hot-reload.
+- Don't over-restart — it interrupts capture.
+
+## Testing — test every approved behavior change in the same pass
+
+When iterating (a request, a fix, a tweak the user just confirmed), add a test that captures that specific behavior **as part of the same change** — a regression test that would fail before the change and pass after. This applies to bug fixes (test the exact broken case), new branches/conditions (cover each), and copy/contract changes other code depends on. Do not defer tests to "later" or a separate commit.
+
+- **Unit tests** — vitest, `src/**/*.test.ts` (run `npm test`). Keep logic pure and Electron-free so it's testable: extract decision logic into a no-import module and test that (see `model-sizing.ts`, `search-ranking.ts` + their `__tests__/`). DB/Electron-bound code (anything importing `getDB`, `vision`, etc.) can't be unit-tested directly — pull the pure part out.
+- **Regression guards for prompts/contracts** — when a fix lives in a prompt or string contract, assert it by reading the source (see `extract-prompt.test.ts`, which guards the observation-confabulation fix).
+- **E2E** — Playwright Electron tour in `e2e/` (`npm run test:e2e`), DOM-driven, fresh temp profile, `OFFGRID_PRO=0`. Assert new surfaces render.
+- Before declaring a change done: `npx tsc --noEmit -p tsconfig.node.json && npx tsc --noEmit -p tsconfig.web.json && npm test` — fix failures first.
+
+## Reuse before building — check the inventory FIRST
+
+This is a hard rule, not a preference. **Before writing ANY new component, panel, modal, hook, or service, first search the existing inventory** (`grep -rn` `src/renderer/src/components/`, `ui/`, the relevant screen folder) for something that already does it, and **reuse it**. Do NOT create a new variant of a thing that already exists.
+
+- If something close exists, **extend it with a prop** — never fork a parallel copy. Two surfaces showing the same kind of thing (a viewer, a modal, a card, a search box, a preview pane) MUST use the same component. Parallel versions cause visual + behavioural drift (e.g. don't build a new centered modal when the image **Lightbox** overlay already exists — reuse that layout).
+- Only build new when nothing fits, and say why.
+- UI follows the approved-library + brand-token rules in `docs/DESIGN.md`; icons are `@phosphor-icons/react` only (never lucide).
+
+## Open core — pro feature code lives in the pro repo
+
+**All code for pro features lives in the `desktop-pro` repo (`pro/`), never in core (`desktop`).** Core is public (AGPL); shipping pro source in it defeats open core. This is a hard rule, not a preference.
+
+- A new pro feature: backend → `pro/main/`, UI → `pro/renderer/`, wired in via pro's `activateMain` / view-router — not core `index.ts`, not core `src/renderer`.
+- Core only carries the **inert shell** for a pro surface: a `proCatalog` entry + a `locked: !isPro` nav item that shows `UpgradeScreen`, or a dimmed `ProPlaceholder` in Settings. No pro business logic, handlers, or data flow in core.
+- Pro renderer reaches its IPC through the generic `proInvoke` / `proOn` passthrough — do NOT add per-feature namespaces to the core preload for pro features.
+- Shared, reusable **engines** (e.g. `@offgrid/clipboard`) stay in `shared/` and may be consumed by either tier; it's the desktop **pro integration** that must live in `pro/`.
+- `proEnabled()` (main) / `isPro` (renderer) gate activation; `OFFGRID_PRO=0` forces free. Gating alone is not enough — the source must also physically live in `pro/`.
+
+**Settings sections follow the same rule.** A pro Settings section (proactive delivery, secretary/learned-prefs, identity, fleet console, etc.) is pro feature code — its component + logic live in `pro/renderer` and register into the core Settings screen via the section-registry seam (`pro/renderer/settings.ts` `registerProSettings` → core `registerSettingsSection`; core renders its own sections + all registered ones). Core must NOT hardcode pro section bodies in `Settings.tsx` gated by `isPro` — core only renders a dimmed `ProPlaceholder` for the locked preview when the section isn't registered (free build). Do not `if (isPro) <RealProSection/> : <ProPlaceholder/>` with the real section defined in core.
+
+## Architecture & abstractions (SOLID)
+
+Design to abstractions, not concrete types. When implementations are interchangeable (model backends, TTS/STT engines, image/diffusion runtimes, connectors), the rest of the app depends on one service/interface — never branch on a concrete type in UI/stores (`if (engine === 'kokoro')`, `instanceof X`). Push the decision behind the abstraction; adding an implementation should need zero changes to callers. Normalize capability gaps inside the service, not the UI.
+
+## Copy & content standards
+
+Any change to UI strings, docs, essays, or marketing copy follows the brand voice (`mobile/docs/brand_tone_voice.md`). Easy-to-miss rules: proof-first ("15-30 tok/s", not "fast"); privacy as mechanism ("runs in your Mac's RAM, nothing leaves the device", not "we value privacy"); no em dashes (use " - "), no curly quotes, no exclamation marks; banned words (revolutionary, seamless, empower, leverage, robust, comprehensive, crucial, delve, tapestry, testament, foster, showcase, enhance) and AI-slop phrases ("serves as", "stands as", "it's not X, it's Y") — say it plainly. No emojis in UI.
