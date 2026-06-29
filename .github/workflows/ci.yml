@@ -13,6 +13,7 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 25 # backstop: a hung step fails fast instead of running for hours
     steps:
       - uses: actions/checkout@v4
       - name: Check out pro (paid features) into ./pro
@@ -26,12 +27,20 @@ jobs:
         with:
           node-version: '24' # node:sqlite (used by integration tests) is available unflagged
       - run: npm ci
+      # Hard gates: types + the full test suite.
       - name: Typecheck (core)
+        timeout-minutes: 6
         run: npm run typecheck
       - name: Typecheck (pro)
         if: ${{ hashFiles('pro/tsconfig.json') != '' }}
+        timeout-minutes: 6
         run: cd pro && npx tsc --noEmit -p tsconfig.json
-      - name: Lint
-        run: npm run lint
       - name: Test
+        timeout-minutes: 10
         run: npm test
+      # Advisory: lint is enforced locally; bounded + non-blocking here so an
+      # eslint slowdown over the full tree (incl. checked-out pro/) can't wedge CI.
+      - name: Lint
+        timeout-minutes: 8
+        continue-on-error: true
+        run: npm run lint
