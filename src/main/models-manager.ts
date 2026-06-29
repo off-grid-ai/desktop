@@ -5,7 +5,7 @@
 import fs from 'fs';
 import path from 'path';
 import { llm } from './llm';
-import { getAllActiveModals, setActiveModal as setModal, modalityForKind, type Modality } from './active-models';
+import { getAllActiveModals, setActiveModal as setModal, modalityForKind, isModelActive, type Modality } from './active-models';
 
 export interface DownloadProgress {
   modelId: string;
@@ -428,21 +428,12 @@ export async function getStorageInfo(): Promise<StorageInfo> {
     const lm = id.startsWith('local:') ? locals.find((m) => m.id === id) : undefined;
     if (lm) {
       const bytes = [lm.primary, lm.mmproj].filter(Boolean).reduce((s, n) => s + sizeOf(n as string), 0);
-      return { id, name: lm.name, kind: 'local', bytes, active: id === active };
+      return { id, name: lm.name, kind: 'local', bytes, active: isModelActive({ kind: 'local', id, activeChatId: active, modals }) };
     }
     const e = CATALOG.find((m) => m.id === id);
     const bytes = (e?.files ?? []).reduce((s, f) => s + sizeOf(f.name), 0);
-    const modal = modalityForKind(e?.kind);
-    let isActive: boolean;
-    if (e?.kind === 'text' || e?.kind === 'vision') {
-      isActive = id === active;
-    } else if (modal) {
-      const chosen = modals[modal];
-      const primary = (e?.files?.find((f) => f.role === 'primary') ?? e?.files?.[0])?.name;
-      isActive = chosen != null && (chosen === id || chosen === primary);
-    } else {
-      isActive = false;
-    }
+    const primary = (e?.files?.find((f) => f.role === 'primary') ?? e?.files?.[0])?.name;
+    const isActive = isModelActive({ kind: e?.kind, id, primaryFile: primary, activeChatId: active, modals });
     return { id, name: e?.name ?? id, kind: e?.kind, bytes, active: isActive };
   });
 
