@@ -319,13 +319,13 @@ export class LLMService {
       this.mmProjPath = "";
     }
 
-    // Prefer the updated, self-contained llama.cpp build in bin/llama (supports
-    // newer architectures like gemma4); fall back to the legacy bin/llama-server.
+    // ONE engine: bin/llama/llama-server, built in CI from source with a pinned
+    // macOS deployment target (scripts/build-llama.sh) so it both supports the
+    // newest model archs (gemma4/qwen35) AND runs on macOS 13+. The old dual-
+    // engine setup shipped a second, older binary as a "fallback" that silently
+    // couldn't load those models — removed.
     const roots = binRoots();
-    const candidates = roots.flatMap((r) => [
-        path.join(r, "llama", "llama-server"),
-        path.join(r, "llama-server"),
-    ]);
+    const candidates = roots.map((r) => path.join(r, "llama", "llama-server"));
     const serverPath = candidates.find((p) => fs.existsSync(p)) ?? "";
     if (!serverPath) {
         console.error(`[LLMService] llama-server binary not found. Looked in:\n${candidates.join("\n")}`);
