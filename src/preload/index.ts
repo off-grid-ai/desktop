@@ -369,6 +369,7 @@ try {
     crmWeekReflection: (anchorDayStartSec: number) => ipcRenderer.invoke('crm:week-reflection', anchorDayStartSec),
     crmListActions: () => ipcRenderer.invoke('crm:list-actions'),
     crmSetActionStatus: (id: number, status: 'open' | 'done' | 'dismissed') => ipcRenderer.invoke('crm:set-action-status', id, status),
+    crmAddTodo: (text: string) => ipcRenderer.invoke('crm:add-todo', text),
 
     // Identity
     idGet: () => ipcRenderer.invoke('id:get'),
