@@ -24,6 +24,28 @@ export function modalityForKind(kind?: string | null): Modality | null {
   }
 }
 
+/**
+ * Whether a given installed model is the active one for its type. Pure — the one
+ * rule the Storage UI and getStorageInfo both rely on:
+ *   - image/voice/transcription: matches that modality's chosen value, which is
+ *     stored as either the catalog id OR the primary filename → match either;
+ *   - text/vision/local/imported (no modality): the active chat LLM id.
+ */
+export function isModelActive(opts: {
+  kind?: string | null;
+  id: string;
+  primaryFile?: string | null;
+  activeChatId: string | null;
+  modals: Record<Modality, string | null>;
+}): boolean {
+  const modal = modalityForKind(opts.kind);
+  if (modal) {
+    const chosen = opts.modals[modal];
+    return chosen != null && (chosen === opts.id || chosen === opts.primaryFile);
+  }
+  return opts.id === opts.activeChatId;
+}
+
 function storeFile(): string {
   return path.join(modelsDir(), 'active-modalities.json');
 }
