@@ -20,11 +20,11 @@ interface MeetingState {
   busy: boolean;
   platform: string | null;
   startedAt: number;
-  warningSecondsLeft: number;
+  warnUntil: number; // epoch ms the auto-stop warning expires (0 = no warning)
   error: string;
 }
 
-const EMPTY: MeetingState = { recording: false, busy: false, platform: null, startedAt: 0, warningSecondsLeft: 0, error: '' };
+const EMPTY: MeetingState = { recording: false, busy: false, platform: null, startedAt: 0, warnUntil: 0, error: '' };
 
 /**
  * Thin VIEW of the meeting recorder. The lifecycle (detect → record → warn → stop →
@@ -36,6 +36,7 @@ const EMPTY: MeetingState = { recording: false, busy: false, platform: null, sta
 export function useMeetingRecorder(): MeetingRecorder {
   const [st, setSt] = useState<MeetingState>(EMPTY);
   const [elapsed, setElapsed] = useState(0);
+  const [warningSecondsLeft, setWarningSecondsLeft] = useState(0);
 
   // Subscribe to the controller's broadcast + seed from current state on mount.
   useEffect(() => {
@@ -45,14 +46,20 @@ export function useMeetingRecorder(): MeetingRecorder {
     return () => { alive = false; off?.(); };
   }, []);
 
-  // Display-only elapsed ticker derived from startedAt — drives nothing.
+  // Display-only ticker derived from startedAt + warnUntil — drives nothing. The
+  // controller polls every 10s, so the warning countdown is derived here so it actually
+  // ticks down each second instead of showing a frozen "20s".
   useEffect(() => {
-    if (!st.recording || !st.startedAt) { setElapsed(0); return; }
-    const tick = (): void => setElapsed(Math.max(0, Math.round((Date.now() - st.startedAt) / 1000)));
+    if (!st.recording || !st.startedAt) { setElapsed(0); setWarningSecondsLeft(0); return; }
+    const tick = (): void => {
+      const now = Date.now();
+      setElapsed(Math.max(0, Math.round((now - st.startedAt) / 1000)));
+      setWarningSecondsLeft(st.warnUntil > 0 ? Math.max(0, Math.round((st.warnUntil - now) / 1000)) : 0);
+    };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [st.recording, st.startedAt]);
+  }, [st.recording, st.startedAt, st.warnUntil]);
 
   const start = useCallback((platform?: string): void => { void api.meetingStart?.(platform); }, []);
   const stop = useCallback((): void => { void api.meetingStop?.(); }, []);
@@ -62,7 +69,7 @@ export function useMeetingRecorder(): MeetingRecorder {
     recording: st.recording,
     busy: st.busy,
     elapsed,
-    warningSecondsLeft: st.warningSecondsLeft,
+    warningSecondsLeft,
     platform: st.platform,
     error: st.error,
     start,

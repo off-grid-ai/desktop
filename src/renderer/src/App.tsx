@@ -558,7 +558,7 @@ function AppContent() {
           ) : rec.warningSecondsLeft > 0 ? (
             <>
               <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
-              Stopping in {rec.warningSecondsLeft}s — click to keep, or rejoin the meeting
+              Stopping in {rec.warningSecondsLeft}s - click to keep, or rejoin the meeting
             </>
           ) : (
             <>
