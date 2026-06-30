@@ -489,8 +489,15 @@ function AppContent() {
   // static catalogue and are marked locked in the free build (open the
   // UpgradeScreen); core tabs (Projects / Chat / Models / Settings) sit where
   // they always did.
-  const proItem = (route: string): { label: string; icon: React.ReactNode; view: ViewMode; locked: boolean } => {
-    const f = getProFeature(route)!;
+  // A missing catalog entry must NEVER blank the whole app — no error boundary
+  // wraps the nav, so a TypeError here white-screens every user. If a route has
+  // no ProFeature, skip that item and warn; a dropped tab is recoverable.
+  const proItem = (route: string): { label: string; icon: React.ReactNode; view: ViewMode; locked: boolean } | null => {
+    const f = getProFeature(route);
+    if (!f) {
+      console.warn(`[nav] no pro catalog entry for "${route}" — skipping nav item`);
+      return null;
+    }
     return {
       label: f.label,
       icon: <f.icon className="h-5 w-5 shrink-0 text-neutral-400" weight="regular" />,
@@ -515,7 +522,7 @@ function AppContent() {
     { label: 'Models', icon: <IconDownload className="h-5 w-5 shrink-0" />, view: 'models' as ViewMode },
     { label: 'Gateway', icon: <IconServer2 className="h-5 w-5 shrink-0" />, view: 'gateway' as ViewMode },
     proItem('notifications'),
-  ];
+  ].filter((i): i is { label: string; icon: React.ReactNode; view: ViewMode; locked: boolean } => i !== null);
   const bottomNav: { label: string; icon: React.ReactNode; view: ViewMode; locked?: boolean }[] = [
     { label: 'Settings', icon: <IconSettings className="h-5 w-5 shrink-0" />, view: 'settings' as ViewMode },
   ];

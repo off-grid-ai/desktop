@@ -1646,13 +1646,12 @@ ipcMain.handle('db:search-memories', async (_, query: string) => {
       const fs = await import('fs');
       const path = await import('path');
       const os = await import('os');
-      const { desktopExtraction } = await import('./rag/extractors');
-      if (!desktopExtraction.transcribeAudio) throw new Error('Transcription is not available.');
+      const { transcriptionService } = await import('./transcription/whisper-cli');
       const buf = Buffer.from(audio as ArrayBuffer);
       const tmp = path.join(os.tmpdir(), `offgrid-mic-${Date.now()}.${ext}`);
       await fs.promises.writeFile(tmp, buf);
       try {
-          return await desktopExtraction.transcribeAudio(tmp);
+          return (await transcriptionService.transcribe({ path: tmp })).text;
       } finally {
           fs.promises.unlink(tmp).catch(() => {});
       }
