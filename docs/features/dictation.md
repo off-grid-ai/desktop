@@ -2,6 +2,8 @@
 
 [← All features](../FEATURES.md)
 
+![Dictation](../screenshots/pro-voice.png)
+
 Hold **⌥ Space** and talk. `whisper.cpp` transcribes **on your device** and the text
 is pasted at your cursor in whatever app has focus - editor, terminal, browser, over
 a full-screen window too. Nothing is uploaded; the audio never leaves the machine.

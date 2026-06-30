@@ -2,6 +2,8 @@
 
 [← All features](../FEATURES.md)
 
+![Clipboard](../screenshots/pro-clipboard.png)
+
 A private clipboard manager. Everything you copy is kept in a searchable history with
 previews, and a global-hotkey popup pastes any past item back in two keystrokes. It all
 lives **on your device** - nothing is synced or uploaded.
