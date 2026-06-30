@@ -30,6 +30,10 @@ export interface TranscribeOptions {
   /** Initial-prompt text that biases recognition toward custom vocabulary
    *  (names, jargon) — whisper's --prompt. Keep it short. */
   prompt?: string;
+  /** Return per-utterance timestamped `segments` (drops whisper's -nt). Callers
+   *  that need to interleave/diarize by time (meetings) set this; plain dictation
+   *  leaves it off and reads only `text`. Default false. */
+  timestamps?: boolean;
 }
 
 export interface TranscriptionService {

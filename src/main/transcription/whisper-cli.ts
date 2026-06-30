@@ -11,7 +11,7 @@ import os from 'os';
 import path from 'path';
 import { getActiveModal } from '../active-models';
 import { binRoots, modelsDir } from '../runtime-env';
-import type { TranscriptionService, Transcript, TranscribeOptions } from './types';
+import type { TranscriptionService, Transcript, TranscribeOptions, Seg } from './types';
 
 const execFileAsync = promisify(execFile);
 
@@ -121,18 +121,41 @@ export class WhisperCliTranscription implements TranscriptionService {
     }
 
     try {
-      const args = ['-m', model, '-f', wav, '-l', language, '-nt', '-np'];
+      // -nt strips timestamps (plain text). Keep them when the caller wants
+      // per-utterance segments (meetings interleave two speakers by time).
+      const args = ['-m', model, '-f', wav, '-l', language, '-np'];
+      if (!opts.timestamps) args.push('-nt');
       // -mc 0 + -sns: kill the repetition/hallucination loop + non-speech tokens.
       if (suppress) args.push('-mc', '0', '-sns');
       // Bias toward custom vocabulary (names/jargon) via the initial prompt.
       const prompt = (opts.prompt ?? '').trim();
       if (prompt) args.push('--prompt', prompt.slice(0, 800));
       const { stdout } = await execFileAsync(bin, args, { maxBuffer: 64 * 1024 * 1024, timeout: 30 * 60_000 });
-      return { text: stdout.trim(), language: language === 'auto' ? undefined : language };
+      const lang = language === 'auto' ? undefined : language;
+      if (!opts.timestamps) return { text: stdout.trim(), language: lang };
+      const segments = parseSegments(stdout);
+      return { text: segments.map((s) => s.text).join(' ').trim(), segments, language: lang };
     } finally {
       if (tmp) fs.promises.unlink(tmp).catch(() => {});
     }
   }
+}
+
+/** Parse whisper's timestamped output (`[hh:mm:ss.mmm --> hh:mm:ss.mmm]  text`)
+ *  into segments. The single source of truth for this format — callers that need
+ *  timestamps consume Transcript.segments instead of re-parsing it. */
+function parseSegments(stdout: string): Seg[] {
+  const re = /\[(\d+):(\d+):(\d+(?:\.\d+)?)\s*-->\s*(\d+):(\d+):(\d+(?:\.\d+)?)\]\s*(.*)/;
+  const hms = (h: string, m: string, s: string): number => +h * 3600 + +m * 60 + +s;
+  const out: Seg[] = [];
+  for (const line of stdout.split('\n')) {
+    const m = re.exec(line);
+    if (!m) continue;
+    const text = m[7].trim();
+    if (!text) continue;
+    out.push({ start: hms(m[1], m[2], m[3]), end: hms(m[4], m[5], m[6]), text });
+  }
+  return out;
 }
 
 /** Shared singleton — callers depend on this, not on the class. */
