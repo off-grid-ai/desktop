@@ -38,7 +38,7 @@ acts**, on-device:
 </tr>
 <tr>
 <td width="50%"><strong>Proactive secretary</strong> - surfaces what matters, drafts actions<br><img src="../screenshots/pro-actions.png" width="100%" alt="Proactive secretary" /></td>
-<td width="50%"></td>
+<td width="50%"><strong>Notifications</strong> - approvals and to-dos pulled from your activity<br><img src="../screenshots/pro-notifications.png" width="100%" alt="Notifications" /></td>
 </tr>
 </table>
 
