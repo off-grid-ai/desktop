@@ -33,6 +33,7 @@ import { getActiveModal } from './active-models';
 import { embeddings } from './embeddings';
 import { docsText, docsHtml, openApiSpec } from './api-docs';
 import { handleMcpRequest } from './mcp-server';
+import { llm, type LlmSettings } from './llm';
 
 const UPSTREAM_HOST = '127.0.0.1';
 const UPSTREAM_PORT = 8439; // bundled llama-server (see llm.ts)
@@ -367,6 +368,51 @@ function parseSize(size: unknown): { width?: number; height?: number } {
   return { width: parseInt(m[1], 10), height: parseInt(m[2], 10) };
 }
 
+// ─── Chat message sanitization ───────────────────────────────────────────────
+// Some models (Gemma 4) enforce strict message ordering via their Jinja chat
+// template: system messages MUST be at the very beginning. Clients like Claude
+// Code intersperse system messages mid-conversation (tool context, updates),
+// which makes the template raise "System message must be at the beginning".
+// Fix: pull ALL system messages out, merge their content, and place a single
+// system message at position 0. Non-system messages keep their original order.
+function sanitizeChatMessages(body: unknown): boolean {
+  if (!body || typeof body !== 'object') return false;
+  const b = body as { messages?: unknown[] };
+  if (!Array.isArray(b.messages) || b.messages.length === 0) return false;
+
+  const systemParts: string[] = [];
+  const rest: unknown[] = [];
+  for (const msg of b.messages) {
+    const m = msg as { role?: string; content?: unknown };
+    if (m.role === 'system') {
+      const text = typeof m.content === 'string'
+        ? m.content
+        : Array.isArray(m.content)
+          ? (m.content as { type?: string; text?: string }[])
+              .filter((p) => p.type === 'text' && p.text)
+              .map((p) => p.text)
+              .join('\n')
+          : '';
+      if (text.trim()) systemParts.push(text.trim());
+    } else {
+      rest.push(msg);
+    }
+  }
+  // Nothing to fix if there are no system messages, or exactly one already at pos 0.
+  if (systemParts.length === 0) return false;
+  if (
+    systemParts.length === 1 &&
+    (b.messages[0] as { role?: string }).role === 'system'
+  ) return false;
+
+  // Rebuild: one merged system message + everything else in order.
+  b.messages = [
+    { role: 'system', content: systemParts.join('\n\n') },
+    ...rest,
+  ];
+  return true;
+}
+
 // ─── Text(+image) → text (chat, proxied) ─────────────────────────────────────
 // Walk an OpenAI chat body and replace any remote/file image_url with an inlined
 // base64 data URL (llama-server only accepts data URLs). Returns true if changed.
@@ -479,7 +525,11 @@ async function handleChat(req: http.IncomingMessage, res: http.ServerResponse, r
   let forward: Buffer = buf;
   try {
     body = JSON.parse(buf.toString('utf8'));
-    if (await inlineChatImages(body)) forward = Buffer.from(JSON.stringify(body));
+    let changed = await inlineChatImages(body);
+    // Gemma 4 (and others) reject system messages that aren't at position 0.
+    // Consolidate them before forwarding so any client's ordering works.
+    if (sanitizeChatMessages(body)) changed = true;
+    if (changed) forward = Buffer.from(JSON.stringify(body));
   } catch {
     // Not JSON, or image fetch failed — forward the original bytes untouched.
   }
@@ -967,6 +1017,19 @@ export function startModelServer(port = 7878): void {
         data: [...requests.values()].map((r) => ({ request_id: r.id, kind: r.kind, status: r.status, poll_url: `${r.collection}/${r.id}` })),
       });
       return;
+    }
+
+    // Runtime LLM settings (ctx size, KV-cache, flash-attn, GPU layers, threads,
+    // batch, sampling) — read + update remotely so a control plane (the console,
+    // via the gateway) can configure this node. setSettings persists and respawns
+    // llama-server when launch-time args change.
+    if (url === '/v1/settings' && method === 'GET') return json(res, 200, llm.getSettings());
+    if (url === '/v1/settings' && method === 'POST') {
+      return void (async () => {
+        const patch = (await readJson(req)) as LlmSettings;
+        await llm.setSettings(patch);
+        json(res, 200, { success: true, settings: llm.getSettings() });
+      })().catch((e) => json(res, 500, { error: { message: String((e as Error)?.message ?? e) } }));
     }
 
     if (url === '/v1/embeddings' && method === 'POST') return void handleEmbeddings(req, res, rid);
