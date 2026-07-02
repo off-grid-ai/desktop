@@ -85,6 +85,8 @@ This is a hard rule, not a preference. **Before writing ANY new component, panel
 
 ## Open core — pro feature code lives in the pro repo
 
+The `pro/` directory is a **git submodule** pointing at the private `desktop-pro` repo. It is present in the working tree when you have access to it, absent otherwise. Always run `git submodule update --init` after cloning or pulling if `pro/` is empty. Do not commit changes inside `pro/` from the core repo — commit them in `desktop-pro` first, then bump the submodule pointer here with `git add pro`.
+
 **All code for pro features lives in the `desktop-pro` repo (`pro/`), never in core (`desktop`).** Core is public (AGPL); shipping pro source in it defeats open core. This is a hard rule, not a preference.
 
 - A new pro feature: backend → `pro/main/`, UI → `pro/renderer/`, wired in via pro's `activateMain` / view-router — not core `index.ts`, not core `src/renderer`.
