@@ -32,6 +32,7 @@ export function DictationOverlay(): React.JSX.Element | null {
   const [interim, setInterim] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<'hold' | 'toggle' | 'both'>('hold');
+  const [accelerator, setAccelerator] = useState('Option+Space');
 
   const ctxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -112,7 +113,7 @@ export function DictationOverlay(): React.JSX.Element | null {
       void startCapture();
     };
     void v.getState().then((s) => { if (s === 'recording') begin(); });
-    void v.getSettings().then((s) => setMode(s.mode));
+    void v.getSettings().then((s) => { setMode(s.mode); setAccelerator(s.accelerator || 'Option+Space'); });
     const offs = [
       v.on('begin', begin),
       v.on('interim', (text) => setInterim(String(text ?? ''))),
@@ -153,7 +154,7 @@ export function DictationOverlay(): React.JSX.Element | null {
   const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
   const ss = String(elapsed % 60).padStart(2, '0');
   const stop = (): void => { void voice()?.toggle(); };
-  const hint = mode === 'hold' ? 'release ⌥Space to stop' : 'tap ⌥Space or ■ to stop';
+  const hint = mode === 'hold' ? `release ${accelerator} to stop` : `tap ${accelerator} or ■ to stop`;
 
   return (
     <div className="flex h-screen w-screen items-stretch justify-center bg-transparent p-2 font-mono">

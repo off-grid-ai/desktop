@@ -78,8 +78,8 @@ export function whisperModel(): string | null {
  *  ticks where latency matters more than accuracy. Respects the user's explicit
  *  transcription model choice (getActiveModal); otherwise picks the smallest. */
 export function smallWhisperModel(): string | null {
+  const dir = modelsDir();
   try {
-    const dir = modelsDir();
     const chosen = getActiveModal('transcription');
     if (chosen && fs.existsSync(path.join(dir, chosen))) return path.join(dir, chosen);
   } catch { /* fall through to size-based pick */ }
@@ -88,7 +88,7 @@ export function smallWhisperModel(): string | null {
   const multi = files.filter((f) => !/\.en\.bin$/i.test(f));
   const pool = multi.length ? multi : files;
   const pick = [...pool].sort((a, b) => sizeRank(a) - sizeRank(b))[0]; // smallest first
-  return path.join(modelsDir(), pick);
+  return path.join(dir, pick);
 }
 
 /** Resolve an opts.model (abs path or filename in modelsDir) to an absolute path. */

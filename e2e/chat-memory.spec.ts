@@ -130,7 +130,7 @@ test('chat composer renders and accepts input', async () => {
 
   // Verify the send button is present.
   const sendBtn = page.locator('button[type="submit"], button').filter({ has: page.locator('svg') }).last();
-  expect(sendBtn).toBeTruthy();
+  await expect(sendBtn).toBeVisible();
 
   // Clear without sending — we don't have a model running.
   await composer.fill('');

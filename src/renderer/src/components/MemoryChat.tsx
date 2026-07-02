@@ -1054,7 +1054,7 @@ export function MemoryChat({ onNavigateToMemory, onNavigateToChat, onNavigateToE
       const cid = streamConvRef.current.get(data.streamId);
       if (!cid) return;
       setConvMessages(cid, prev => prev.map(m => {
-        if (m.id !== data.streamId) return m;
+        if (m.id !== data.streamId || !m.streaming) return m;
         if (data.type === 'content') return { ...m, content: (m.content || '') + (data.text || '') };
         if (data.type === 'reasoning') return { ...m, reasoning: (m.reasoning || '') + (data.text || '') };
         if (data.type === 'step') return { ...m, activity: data.step as ChatMessage['activity'] };
