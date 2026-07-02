@@ -62,8 +62,20 @@ When iterating (a request, a fix, a tweak the user just confirmed), add a test t
 
 - **Unit tests** — vitest, `src/**/*.test.ts` (run `npm test`). Keep logic pure and Electron-free so it's testable: extract decision logic into a no-import module and test that (see `model-sizing.ts`, `search-ranking.ts` + their `__tests__/`). DB/Electron-bound code (anything importing `getDB`, `vision`, etc.) can't be unit-tested directly — pull the pure part out.
 - **Regression guards for prompts/contracts** — when a fix lives in a prompt or string contract, assert it by reading the source (see `extract-prompt.test.ts`, which guards the observation-confabulation fix).
-- **E2E** — Playwright Electron tour in `e2e/` (`npm run test:e2e`), DOM-driven, fresh temp profile, `OFFGRID_PRO=0`. Assert new surfaces render.
+- **E2E** — Playwright Electron tour in `e2e/` (`npm run test:e2e`), DOM-driven, fresh temp profile, `OFFGRID_PRO=0`. Assert new surfaces render. Screenshot key states via `page.screenshot({ path: 'e2e/screenshots/<name>.png' })`; include those screenshots in the PR body.
 - Before declaring a change done: `npx tsc --noEmit -p tsconfig.node.json && npx tsc --noEmit -p tsconfig.web.json && npm test` — fix failures first.
+
+## Pull requests — required evidence
+
+Every PR must include in its body:
+
+- **Screenshots** — at minimum one before/after or annotated screenshot per changed surface. Use `page.screenshot()` in E2E tests to capture these automatically into `e2e/screenshots/`; embed them in the PR body with `![description](url)`.
+- **Video** (when the change involves interaction or animation) — record a short screen capture (QuickTime / `ffmpeg -f avfoundation`) of the golden path and attach it. A 15-30 second clip is enough. If a video can't be captured (CI/headless), add a note explaining why and provide extra screenshots instead.
+- **Test output** — paste the relevant lines from `npm test` and `npm run test:e2e`.
+
+**Screenshot validation is mandatory — not optional.** Before embedding any screenshot in the PR body, read the image file and confirm it shows what the description claims. If the screenshot shows an unexpected state (wrong screen, error that contradicts the fix, two bubbles when one is expected, etc.), investigate why the screenshot looks that way, fix the underlying issue, and retake the screenshot. A screenshot that disproves the fix is worse than no screenshot at all.
+
+Without evidence the PR is not ready to merge.
 
 ## Reuse before building — check the inventory FIRST
 
@@ -74,6 +86,8 @@ This is a hard rule, not a preference. **Before writing ANY new component, panel
 - UI follows the approved-library + brand-token rules in `docs/DESIGN.md`; icons are `@phosphor-icons/react` only (never lucide).
 
 ## Open core — pro feature code lives in the pro repo
+
+The `pro/` directory is a **git submodule** pointing at the private `desktop-pro` repo. It is present in the working tree when you have access to it, absent otherwise. Always run `git submodule update --init` after cloning or pulling if `pro/` is empty. Do not commit changes inside `pro/` from the core repo — commit them in `desktop-pro` first, then bump the submodule pointer here with `git add pro`.
 
 **All code for pro features lives in the `desktop-pro` repo (`pro/`), never in core (`desktop`).** Core is public (AGPL); shipping pro source in it defeats open core. This is a hard rule, not a preference.
 
